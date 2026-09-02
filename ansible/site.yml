@@ -1,20 +1,8 @@
 ---
-# =============================================================================
-# PLAYBOOK PRINCIPAL - Desafio DevOps Korp
+# Provisiona o ambiente inteiro: ansible-playbook site.yml
 #
-# Provisiona o ambiente inteiro (Partes 1, 2 e 3) com um unico comando:
-#
-#   ansible-playbook site.yml
-#
-# Ordem das roles:
-#   docker      -> instala e configura o Docker Engine
-#   korp_stack  -> rede bridge, build da imagem, configs e containers
-#   validate    -> requisicao HTTP de validacao e exibicao no console
-#
-# Execucao parcial por tags, util durante o desenvolvimento:
-#   ansible-playbook site.yml --tags validate
-#   ansible-playbook site.yml --skip-tags docker
-# =============================================================================
+# Roles: docker (engine) -> korp_stack (rede, build, containers) -> validate.
+# Execucao parcial por tags: --tags validate, --skip-tags docker.
 
 - name: Provisionar o ambiente do Projeto Korp
   hosts: korp

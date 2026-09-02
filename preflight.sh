@@ -1,12 +1,8 @@
 #!/usr/bin/env bash
-# =============================================================================
-# preflight.sh - Auditoria do ambiente antes do primeiro provisionamento
+# Checa control node e host alvo antes do primeiro deploy. Nao altera nada.
 #
-# Verifica control node e host alvo. Nao altera nada, so inspeciona.
-#
-#   ./preflight.sh                    # usa os padroes abaixo
+#   ./preflight.sh
 #   VM_IP=192.168.0.161 ./preflight.sh
-# =============================================================================
 
 VM_IP="${VM_IP:-192.168.0.161}"
 VM_USER="${VM_USER:-korp}"
@@ -22,7 +18,7 @@ amarelo()  { printf '  \033[33mAVISO\033[0m %s\n' "$1"; warn=$((warn+1)); }
 vermelho() { printf '  \033[31mFALHA\033[0m %s\n' "$1"; fail=$((fail+1)); }
 secao()    { printf '\n\033[1m%s\033[0m\n' "$1"; }
 
-# checa(descricao, comando, valor_esperado_regex)
+# checa(descricao, comando, regex_esperada)
 checa() {
   local desc="$1" out
   out=$(eval "$2" 2>/dev/null)
@@ -38,13 +34,11 @@ echo "  PREFLIGHT - Projeto Korp"
 echo "  Alvo: ${VM_USER}@${VM_IP}   Projeto: ${PROJ}"
 echo "==============================================================="
 
-# -----------------------------------------------------------------------------
 secao "1. CONTROL NODE"
-# -----------------------------------------------------------------------------
 
 if command -v ansible >/dev/null 2>&1; then
-  # Captura a saida inteira antes de filtrar. Usar 'ansible --version | head'
-  # fecha o pipe cedo e faz o ansible cuspir um traceback de BrokenPipeError.
+  # Captura tudo antes de filtrar: 'ansible --version | head' fecha o pipe
+  # cedo e gera BrokenPipeError.
   AVOUT=$(ansible --version 2>/dev/null)
   AV=$(printf '%s\n' "$AVOUT" | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
   MAJ=${AV%%.*}; MIN=$(echo "$AV" | cut -d. -f2)
@@ -79,17 +73,12 @@ if [[ -f "$SSH_KEY" ]]; then
                          || amarelo "permissao da chave: $perm (o ideal e 600)"
 fi
 
-# -----------------------------------------------------------------------------
 secao "2. REPOSITORIO"
-# -----------------------------------------------------------------------------
 
 if [[ -d "$PROJ" ]]; then
   verde "projeto em $PROJ"
-  n=$(find "$PROJ" -type f -not -path '*/.git/*' | wc -l)
-  (( n >= 33 )) && verde "$n arquivos (32 originais + go.sum)" \
-                || amarelo "$n arquivos (esperado 33+)"
 
-  [[ -f "$PROJ/app/go.sum" ]] && verde "go.sum gerado ($(wc -l < "$PROJ/app/go.sum") linhas)" \
+  [[ -f "$PROJ/app/go.sum" ]] && verde "go.sum presente ($(wc -l < "$PROJ/app/go.sum") linhas)" \
                               || vermelho "go.sum ausente -> rode 'make tidy'"
 
   if grep -qE '^toolchain ' "$PROJ/app/go.mod" 2>/dev/null; then
@@ -122,9 +111,7 @@ else
   vermelho "projeto nao encontrado em $PROJ"
 fi
 
-# -----------------------------------------------------------------------------
 secao "3. CONECTIVIDADE COM A VM"
-# -----------------------------------------------------------------------------
 
 if $SSH "echo conectado" >/dev/null 2>&1; then
   verde "SSH por chave, sem senha"
@@ -139,9 +126,7 @@ nk=$($SSH 'wc -l < ~/.ssh/authorized_keys' 2>/dev/null)
 [[ "$nk" == "1" ]] && verde "authorized_keys com 1 chave (so a de automacao)" \
                    || amarelo "authorized_keys com $nk chaves"
 
-# -----------------------------------------------------------------------------
 secao "4. SISTEMA OPERACIONAL DA VM"
-# -----------------------------------------------------------------------------
 
 checa "distribuicao" "$SSH 'grep ^VERSION_CODENAME= /etc/os-release | cut -d= -f2'" '^trixie$'
 checa "python3"      "$SSH 'python3 --version'" 'Python 3'
@@ -164,11 +149,7 @@ else
   amarelo "qemu-guest-agent inativo (IP nao aparece no Proxmox)"
 fi
 
-# -----------------------------------------------------------------------------
 secao "5. SINCRONIA DE RELOGIO"
-# -----------------------------------------------------------------------------
-# O servico devolve horario UTC e o Prometheus indexa metricas por timestamp.
-# Relogio fora de sincronia estraga os dois.
 
 sync=$($SSH "timedatectl show -p NTPSynchronized --value" 2>/dev/null)
 [[ "$sync" == "yes" ]] && verde "relogio sincronizado via NTP" \
@@ -180,10 +161,7 @@ delta=$(( drift > local_s ? drift - local_s : local_s - drift ))
 (( delta <= 2 )) && verde "diferenca de relogio com o control node: ${delta}s" \
                  || amarelo "diferenca de relogio: ${delta}s"
 
-# -----------------------------------------------------------------------------
 secao "6. PORTAS E ESTADO LIMPO"
-# -----------------------------------------------------------------------------
-# A VM deve estar SEM Docker: quem instala e o playbook.
 
 for p in 80 3000 8080 9090; do
   if $SSH "ss -tulpn 2>/dev/null | grep -q ':$p '" 2>/dev/null; then
@@ -205,10 +183,7 @@ else
   verde "nenhum servidor web no host"
 fi
 
-# -----------------------------------------------------------------------------
 secao "7. RESOLUCAO DNS DOS REGISTRIES"
-# -----------------------------------------------------------------------------
-# A build puxa imagens de tres dominios distintos. Testar so um nao basta.
 
 for d in deb.debian.org download.docker.com registry-1.docker.io \
          auth.docker.io gcr.io storage.googleapis.com proxy.golang.org; do
@@ -219,9 +194,7 @@ for d in deb.debian.org download.docker.com registry-1.docker.io \
   fi
 done
 
-# -----------------------------------------------------------------------------
 secao "8. ALCANCE HTTPS AOS REGISTRIES"
-# -----------------------------------------------------------------------------
 
 if $SSH 'command -v curl' >/dev/null 2>&1; then
   for u in https://download.docker.com https://registry-1.docker.io/v2/ \
@@ -237,18 +210,16 @@ else
   amarelo "curl ausente na VM, pulando teste HTTPS"
 fi
 
-# -----------------------------------------------------------------------------
 echo
 echo "==============================================================="
 printf "  RESUMO: \033[32m%d OK\033[0m / \033[33m%d avisos\033[0m / \033[31m%d falhas\033[0m\n" "$ok" "$warn" "$fail"
 echo "==============================================================="
 echo
-echo "  Checagens manuais no Proxmox (o script nao alcanca):"
-echo "    [ ] snapshot 'base-limpa' existe e a VM estava DESLIGADA"
-echo "    [ ] CD/DVD Drive = 'Do not use any media' (ISO removido)"
-echo "    [ ] aba Network: checkbox Firewall DESMARCADO"
-echo "    [ ] espaco livre no local-lvm  ->  lvs --units g"
-echo "    [ ] backup vzdump da VM 600 antes de destrui-la"
+echo "  Checagens manuais no Proxmox:"
+echo "    [ ] snapshot limpo existe e a VM estava desligada"
+echo "    [ ] ISO removida do drive de CD/DVD"
+echo "    [ ] firewall da interface desmarcado"
+echo "    [ ] espaco livre no storage (lvs --units g)"
 echo
 
 (( fail > 0 )) && exit 1 || exit 0

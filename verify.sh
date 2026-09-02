@@ -1,15 +1,8 @@
 #!/usr/bin/env bash
-# =============================================================================
-# verify.sh - Aceite do ambiente contra os requisitos do desafio
-#
-# Enquanto o preflight.sh checa PRE-condicoes (antes do deploy), este checa
-# POS-condicoes: a stack rodando entrega o que o enunciado pede?
-#
-# Cada verificacao cita o item do desafio que ela comprova.
+# Aceite do ambiente provisionado contra os requisitos do desafio.
 #
 #   ./verify.sh
 #   VM_IP=192.168.0.161 ./verify.sh
-# =============================================================================
 
 VM_IP="${VM_IP:-192.168.0.161}"
 VM_USER="${VM_USER:-korp}"
@@ -29,9 +22,7 @@ echo "==============================================================="
 
 $S "echo ok" >/dev/null 2>&1 || { echo "SSH indisponivel. Abortando."; exit 1; }
 
-# =============================================================================
 secao "PARTE 1.1 - Servico HTTP"
-# =============================================================================
 
 item "requisito: o servico deve se chamar http-server-projeto-korp"
 if $S "docker ps --format '{{.Names}}'" 2>/dev/null | grep -qx 'http-server-projeto-korp'; then
@@ -82,9 +73,7 @@ if [[ -n "$SERV" ]]; then
                || vermelho "horario divergente em ${D}s"
 fi
 
-# =============================================================================
 secao "PARTE 1.2 - Docker instalado e configurado"
-# =============================================================================
 
 V=$($S "docker --version" 2>/dev/null)
 [[ -n "$V" ]] && verde "$V" || vermelho "docker nao instalado"
@@ -96,9 +85,7 @@ $S "systemctl is-enabled --quiet docker" 2>/dev/null \
   && verde "docker habilitado no boot" \
   || vermelho "docker nao habilitado no boot"
 
-# =============================================================================
 secao "PARTE 1.3 - Rede Docker em modo bridge"
-# =============================================================================
 
 item "requisito: criar uma rede Docker no modo bridge"
 DRV=$($S "docker network inspect korp-net --format '{{.Driver}}'" 2>/dev/null)
@@ -113,9 +100,7 @@ for c in http-server-projeto-korp nginx-projeto-korp prometheus-projeto-korp gra
   fi
 done
 
-# =============================================================================
 secao "PARTE 1.4 - Containers via Docker Compose"
-# =============================================================================
 
 item "requisito: o container da aplicacao NAO deve expor portas ao host"
 P=$($S "docker inspect http-server-projeto-korp --format '{{json .NetworkSettings.Ports}}'" 2>/dev/null)
@@ -145,9 +130,7 @@ else
   vermelho "volume em /etc/nginx/conf.d ausente"
 fi
 
-# =============================================================================
 secao "PARTE 1.5 - Proxy reverso"
-# =============================================================================
 
 item "requisito: arquivo http-server-projeto-korp.conf no volume montado"
 if $S "docker exec nginx-projeto-korp test -f /etc/nginx/conf.d/http-server-projeto-korp.conf" 2>/dev/null; then
@@ -160,25 +143,17 @@ $S "docker exec nginx-projeto-korp nginx -t" >/dev/null 2>&1 \
   && verde "configuracao do nginx valida (nginx -t)" \
   || vermelho "nginx -t reportou erro"
 
-# =============================================================================
 secao "PARTE 1.6 - Teste de funcionamento"
-# =============================================================================
 
 item "requisito: curl http://localhost:80/projeto-korp"
 CODE=$($S "curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:80/projeto-korp" 2>/dev/null)
 [[ "$CODE" == "200" ]] && verde "HTTP $CODE via porta 80" \
                        || vermelho "HTTP $CODE (esperado 200)"
 
-# =============================================================================
 secao "PARTE 2.1 - Metricas no padrao Prometheus"
-# =============================================================================
-
-M=$($S "docker exec http-server-projeto-korp /app/healthcheck && curl -s --max-time 5 http://localhost:9090/api/v1/query?query=up" 2>/dev/null)
 
 item "requisito: metrica de disponibilidade do servico"
-# --get + --data-urlencode faz o curl codificar a query. Sem isso, as
-# chaves e aspas de up{job="..."} vao cruas na URL e o Prometheus nao
-# interpreta o seletor de label.
+# --get + --data-urlencode: as chaves e aspas do seletor precisam ir codificadas.
 UP=$($S "curl -s --max-time 5 --get --data-urlencode 'query=up{job=\"http-server-projeto-korp\"}' http://localhost:9090/api/v1/query" 2>/dev/null)
 if echo "$UP" | grep -q '"value".*"1"'; then
   verde "up{job=\"http-server-projeto-korp\"} = 1"
@@ -195,14 +170,12 @@ else
   vermelho "korp_http_requests_total ausente ou zerado"
 fi
 
-item "verificacao: /metrics bloqueado na borda (nao exigido, mas intencional)"
+item "verificacao: /metrics bloqueado na borda"
 MC=$($S "curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:80/metrics" 2>/dev/null)
 [[ "$MC" == "403" || "$MC" == "404" ]] && verde "/metrics devolve $MC via nginx" \
                                        || vermelho "/metrics acessivel na borda (HTTP $MC)"
 
-# =============================================================================
 secao "PARTE 2.2 - Prometheus e Grafana"
-# =============================================================================
 
 item "requisito: prometheus coletando as metricas do servico"
 H=$($S "curl -s --max-time 5 'http://localhost:9090/api/v1/targets?state=active'" 2>/dev/null)
@@ -214,8 +187,6 @@ fi
 
 item "requisito: grafana configurado para visualizar as metricas"
 GH=$($S "curl -s --max-time 5 http://localhost:3000/api/health" 2>/dev/null)
-# O Grafana devolve JSON formatado ("database": "ok", com espaco),
-# entao o padrao precisa tolerar espacos ao redor dos dois-pontos.
 echo "$GH" | grep -qE '"database"[[:space:]]*:[[:space:]]*"ok"' \
   && verde "grafana saudavel" \
   || vermelho "grafana nao responde"
@@ -234,9 +205,7 @@ else
   vermelho "dashboard nao encontrado"
 fi
 
-# =============================================================================
 secao "SAUDE GERAL DOS CONTAINERS"
-# =============================================================================
 
 for c in http-server-projeto-korp nginx-projeto-korp prometheus-projeto-korp grafana-projeto-korp; do
   ST=$($S "docker inspect $c --format '{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}sem-healthcheck{{end}}|{{.RestartCount}}'" 2>/dev/null)
@@ -248,18 +217,14 @@ for c in http-server-projeto-korp nginx-projeto-korp prometheus-projeto-korp gra
   fi
 done
 
-# =============================================================================
 echo
 echo "==============================================================="
 printf "  RESULTADO: \033[32m%d OK\033[0m / \033[31m%d falhas\033[0m\n" "$ok" "$fail"
 echo "==============================================================="
 echo
-echo "  Falta comprovar manualmente:"
-echo "    [ ] IDEMPOTENCIA: rodar 'make deploy' 2x seguidas"
-echo "        -> a 2a execucao deve terminar com changed=0"
-echo "    [ ] REPRODUTIBILIDADE: rollback do snapshot 'base-limpa'"
-echo "        -> 'make deploy' reconstroi tudo do zero"
-echo "    [ ] Dashboard renderizando com dados (print para docs/img/)"
+echo "  Verificar manualmente:"
+echo "    [ ] idempotencia: 'make deploy' 2x, a 2a termina com changed=0"
+echo "    [ ] reprodutibilidade: snapshot limpo + 'make deploy'"
 echo
 
 (( fail > 0 )) && exit 1 || exit 0

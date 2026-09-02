@@ -1,21 +1,16 @@
 ---
-# Diretorio no host alvo onde a stack e materializada.
 korp_project_dir: /opt/projeto-korp
 
-# Rede Docker (requisito: modo bridge)
 korp_network_name: korp-net
 korp_network_subnet: "172.28.0.0/16"
 korp_network_gateway: "172.28.0.1"
-# Nome da interface bridge no host: facilita achar em `ip a` e tcpdump.
 korp_network_bridge_name: br-korp
 
-# Versionamento da imagem
 korp_app_version: "1.0.0"
 korp_app_commit: "ansible"
 korp_build_nocache: false
 
-# Grafana. Em producao viria de um cofre (ansible-vault, Vault, SSM),
-# nunca em texto plano no repositorio.
+# Em producao viria de um cofre (ansible-vault, Vault, SSM).
 korp_grafana_user: admin
 korp_grafana_password: admin
 

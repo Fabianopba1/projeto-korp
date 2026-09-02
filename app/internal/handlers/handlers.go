@@ -9,7 +9,6 @@ import (
 )
 
 // ProjetoKorpResponse e o contrato exigido pelo desafio.
-// As tags json mantem os nomes exatos em portugues.
 type ProjetoKorpResponse struct {
 	Nome    string `json:"nome"`
 	Horario string `json:"horario"`
@@ -22,8 +21,8 @@ type HealthResponse struct {
 	Version string `json:"version"`
 }
 
-// Handler agrupa as dependencias injetadas nos endpoints.
-// Manter "now" como campo permite congelar o tempo nos testes.
+// Handler agrupa as dependencias dos endpoints. Now e um campo para que
+// os testes possam congelar o relogio.
 type Handler struct {
 	Version   string
 	StartedAt time.Time
@@ -31,7 +30,6 @@ type Handler struct {
 	Logger    *slog.Logger
 }
 
-// New cria um Handler com as dependencias padrao de producao.
 func New(version string, logger *slog.Logger) *Handler {
 	return &Handler{
 		Version:   version,
@@ -41,11 +39,8 @@ func New(version string, logger *slog.Logger) *Handler {
 	}
 }
 
-// ProjetoKorp responde GET /projeto-korp.
-//
-// O horario e resolvido a cada requisicao (nada de cache) e convertido
-// para UTC com .UTC(), garantindo o mesmo resultado independente do
-// timezone do container ou do host.
+// ProjetoKorp responde GET /projeto-korp. O horario e lido a cada
+// requisicao e convertido para UTC, independente do fuso do host.
 func (h *Handler) ProjetoKorp(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
@@ -54,16 +49,14 @@ func (h *Handler) ProjetoKorp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := ProjetoKorpResponse{
-		Nome: "Projeto Korp",
-		// RFC3339 e o formato interoperavel padrao. O sufixo "Z"
-		// deixa explicito que o horario esta em UTC.
+		Nome:    "Projeto Korp",
 		Horario: h.Now().UTC().Format(time.RFC3339),
 	}
 
 	h.writeJSON(w, http.StatusOK, resp)
 }
 
-// Health responde a liveness probe: o processo esta vivo?
+// Health e a liveness probe.
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, http.StatusOK, HealthResponse{
 		Status:  "ok",
@@ -72,11 +65,8 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Ready responde a readiness probe: o servico pode receber trafego?
-//
-// Neste projeto nao ha dependencias externas (banco, cache, fila), entao
-// liveness e readiness coincidem. Elas ficam separadas porque no momento
-// em que uma dependencia existir, so este handler precisa mudar.
+// Ready e a readiness probe. Hoje coincide com Health porque nao ha
+// dependencias externas; fica separada para quando houver.
 func (h *Handler) Ready(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, http.StatusOK, HealthResponse{
 		Status:  "ready",
@@ -85,8 +75,6 @@ func (h *Handler) Ready(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// NotFound devolve 404 em JSON, mantendo o content-type consistente
-// em toda a API.
 func (h *Handler) NotFound(w http.ResponseWriter, r *http.Request) {
 	h.writeError(w, http.StatusNotFound, "rota nao encontrada")
 }
@@ -97,8 +85,6 @@ func (h *Handler) writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.WriteHeader(status)
 
 	if err := json.NewEncoder(w).Encode(payload); err != nil {
-		// O header ja foi enviado, entao nao da para trocar o status.
-		// Resta registrar para o operador.
 		h.Logger.Error("falha ao serializar resposta", slog.Any("erro", err))
 	}
 }

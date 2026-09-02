@@ -1,11 +1,5 @@
-# =============================================================================
-# Provisionamento do datasource - lido pelo Grafana na inicializacao.
-# Nenhum clique na interface e necessario.
-# =============================================================================
 apiVersion: 1
 
-# Remove datasources antigos com o mesmo nome antes de recriar, tornando
-# o provisionamento idempotente.
 deleteDatasources:
   - name: Prometheus
     orgId: 1
@@ -13,18 +7,13 @@ deleteDatasources:
 datasources:
   - name: Prometheus
     type: prometheus
-    # uid fixo: o JSON do dashboard referencia este uid. Sem fixar, o
-    # Grafana geraria um uid aleatorio e os paineis ficariam orfaos.
+    # uid fixo: o JSON do dashboard referencia este valor.
     uid: prometheus-korp
-    access: proxy          # o backend do Grafana consulta, nao o browser
+    access: proxy
     url: http://prometheus:9090
     orgId: 1
     isDefault: true
-    # editable: false deixa claro que a fonte da verdade e este arquivo,
-    # nao a interface web.
     editable: false
     jsonData:
       httpMethod: POST
-      # Deve casar com o scrape_interval do prometheus.yml para o Grafana
-      # sugerir passos de query coerentes.
       timeInterval: 15s

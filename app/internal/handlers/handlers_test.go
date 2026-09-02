@@ -15,7 +15,6 @@ func newTestHandler() *Handler {
 	return New("test", slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
-// Valida o contrato exato exigido pelo desafio.
 func TestProjetoKorpRetornaContratoEsperado(t *testing.T) {
 	h := newTestHandler()
 
@@ -45,12 +44,10 @@ func TestProjetoKorpRetornaContratoEsperado(t *testing.T) {
 	}
 }
 
-// O desafio exige explicitamente horario em UTC.
+// Congela o relogio em -03:00: se o handler nao converter, o teste quebra.
 func TestHorarioEstaEmUTC(t *testing.T) {
 	h := newTestHandler()
 
-	// Congela o relogio num fuso deslocado (-03:00, horario de Brasilia).
-	// Se o handler nao converter para UTC, o teste quebra.
 	fuso := time.FixedZone("America/Sao_Paulo", -3*3600)
 	h.Now = func() time.Time {
 		return time.Date(2026, 3, 15, 9, 30, 0, 0, fuso)
@@ -64,15 +61,13 @@ func TestHorarioEstaEmUTC(t *testing.T) {
 		t.Fatalf("JSON invalido: %v", err)
 	}
 
-	// 09:30 em -03:00 equivale a 12:30 UTC.
 	const esperado = "2026-03-15T12:30:00Z"
 	if body.Horario != esperado {
 		t.Errorf("horario = %q, esperado %q", body.Horario, esperado)
 	}
 }
 
-// O desafio pede que o horario seja resolvido dinamicamente a cada
-// requisicao, ou seja: nada de valor calculado uma vez na inicializacao.
+// O horario nao pode ser calculado uma unica vez na inicializacao.
 func TestHorarioEhResolvidoACadaRequisicao(t *testing.T) {
 	h := newTestHandler()
 

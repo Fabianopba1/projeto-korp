@@ -1,7 +1,3 @@
-# =============================================================================
-# Provider de dashboards: manda o Grafana varrer um diretorio em busca
-# de arquivos .json e carrega-los automaticamente.
-# =============================================================================
 apiVersion: 1
 
 providers:
@@ -10,8 +6,6 @@ providers:
     folder: Projeto Korp
     type: file
     disableDeletion: false
-    # Reescaneia o diretorio periodicamente: editar o JSON e recarregar
-    # a pagina ja reflete a mudanca, sem reiniciar o container.
     updateIntervalSeconds: 30
     allowUiUpdates: true
     options:

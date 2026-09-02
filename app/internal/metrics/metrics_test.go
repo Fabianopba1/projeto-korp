@@ -9,8 +9,6 @@ import (
 	dto "github.com/prometheus/client_model/go"
 )
 
-// valor le o valor atual de um counter sem depender do pacote testutil,
-// que traria uma dependencia nova ao go.mod.
 func valor(t *testing.T, c prometheus.Counter) float64 {
 	t.Helper()
 	var m dto.Metric
@@ -26,7 +24,7 @@ func TestNormalizeMethod(t *testing.T) {
 		"POST":   "POST",
 		"HEAD":   "HEAD",
 		"FOOBAR": "other",
-		"get":    "other", // metodos sao case-sensitive no HTTP
+		"get":    "other",
 		"":       "other",
 	}
 	for entrada, esperado := range casos {

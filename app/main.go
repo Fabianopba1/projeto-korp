@@ -1,7 +1,5 @@
-// Servico http-server-projeto-korp.
-//
-// Servidor HTTP em Go que expoe GET /projeto-korp devolvendo o nome do
-// projeto e o horario atual em UTC, alem de metricas no padrao Prometheus.
+// http-server-projeto-korp: expoe GET /projeto-korp com o nome do projeto
+// e o horario atual em UTC, alem de metricas no formato Prometheus.
 package main
 
 import (
@@ -19,7 +17,7 @@ import (
 	"github.com/korp/http-server-projeto-korp/internal/metrics"
 )
 
-// Injetados em build time via -ldflags. Ver Dockerfile.
+// Injetados via -ldflags no build (ver Dockerfile).
 var (
 	version = "dev"
 	commit  = "none"
@@ -38,33 +36,26 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	// Cada rota e registrada com seu proprio middleware, passando o
-	// padrao da rota como label. Isso mantem a cardinalidade das
-	// metricas sob controle.
+	// O padrao da rota vira o label "path" das metricas, nunca a URL crua.
 	mux.Handle("/projeto-korp", metrics.Middleware("/projeto-korp", http.HandlerFunc(h.ProjetoKorp)))
 	mux.Handle("/health", metrics.Middleware("/health", http.HandlerFunc(h.Health)))
 	mux.Handle("/ready", metrics.Middleware("/ready", http.HandlerFunc(h.Ready)))
 
-	// /metrics fica fora do middleware de proposito: nao faz sentido
-	// contabilizar o proprio scrape do Prometheus como trafego do servico.
+	// Fora do middleware: o scrape do Prometheus nao conta como trafego.
 	mux.Handle("/metrics", metrics.Handler())
 
 	mux.Handle("/", metrics.Middleware("other", http.HandlerFunc(h.NotFound)))
 
 	srv := &http.Server{
-		Addr:    ":" + port,
-		Handler: requestLogger(logger, mux),
-
-		// Timeouts explicitos. Sem eles uma conexao lenta pode segurar
-		// um handler indefinidamente (Slowloris).
+		Addr:              ":" + port,
+		Handler:           requestLogger(logger, mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,
 		IdleTimeout:       60 * time.Second,
-		MaxHeaderBytes:    1 << 20, // 1 MiB
+		MaxHeaderBytes:    1 << 20,
 	}
 
-	// Sobe o servidor em goroutine para o main poder aguardar sinais.
 	errCh := make(chan error, 1)
 	go func() {
 		logger.Info("servidor iniciado",
@@ -77,8 +68,7 @@ func main() {
 		}
 	}()
 
-	// Graceful shutdown: o Docker envia SIGTERM ao parar o container.
-	// Sem tratar o sinal, conexoes em voo sao cortadas no meio.
+	// docker stop envia SIGTERM: drena as conexoes em voo antes de sair.
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
@@ -102,7 +92,6 @@ func main() {
 	logger.Info("servidor encerrado com sucesso")
 }
 
-// requestLogger emite um log estruturado por requisicao.
 func requestLogger(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -111,14 +100,14 @@ func requestLogger(logger *slog.Logger, next http.Handler) http.Handler {
 		logger.Info("requisicao",
 			slog.String("metodo", r.Method),
 			slog.String("path", r.URL.Path),
-			// X-Forwarded-For e preenchido pelo NGINX; sem ele o IP
-			// seria sempre o da rede docker.
 			slog.String("client_ip", clientIP(r)),
 			slog.String("duracao", time.Since(start).String()),
 		)
 	})
 }
 
+// clientIP prefere o X-Forwarded-For preenchido pelo nginx; sem ele o IP
+// seria sempre o da rede docker.
 func clientIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		return xff

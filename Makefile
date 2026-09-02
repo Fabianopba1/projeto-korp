@@ -1,6 +1,3 @@
-# =============================================================================
-# Atalhos do projeto. `make` sem argumento lista os alvos disponiveis.
-# =============================================================================
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
@@ -15,9 +12,9 @@ help: ## Lista os alvos disponiveis
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 	 | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
-# --- Aplicacao Go ------------------------------------------------------------
+# --- Go ----------------------------------------------------------------------
 .PHONY: tidy
-tidy: ## Resolve dependencias e gera o go.sum (rode isto primeiro!)
+tidy: ## Atualiza go.mod e go.sum
 	cd $(APP_DIR) && go mod tidy
 
 .PHONY: test
@@ -92,7 +89,7 @@ check: ## Valida a sintaxe do playbook
 	cd $(ANSIBLE_DIR) && ansible-playbook site.yml --syntax-check
 
 .PHONY: deploy
-deploy: ## Provisiona o ambiente inteiro (o comando unico do desafio)
+deploy: ## Provisiona o ambiente inteiro
 	cd $(ANSIBLE_DIR) && ansible-playbook site.yml
 
 .PHONY: validate

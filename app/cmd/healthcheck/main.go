@@ -1,12 +1,5 @@
-// Binario auxiliar de healthcheck.
-//
-// A imagem final e distroless: nao tem shell, curl nem wget. Para que a
-// instrucao HEALTHCHECK do Docker funcione, compilamos este binario
-// minusculo no mesmo build e o copiamos junto do servidor.
-//
-// Alternativa comum seria usar uma imagem alpine so para ter o wget, mas
-// isso significaria carregar um shell e um gerenciador de pacotes em
-// producao apenas para um health check.
+// Healthcheck para a imagem distroless, que nao tem shell, curl nem wget.
+// Compilado no mesmo build e usado pela instrucao HEALTHCHECK.
 package main
 
 import (

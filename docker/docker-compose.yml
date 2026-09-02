@@ -1,36 +1,11 @@
-# =============================================================================
-# Stack do desafio Korp
+# Stack do desafio: nginx (:80) -> app (:8080) <- prometheus (:9090) <- grafana (:3000)
 #
-#   internet --> :80 nginx --> :8080 http-server-projeto-korp
-#                                        ^
-#                                        | scrape /metrics
-#                                   prometheus :9090
-#                                        ^
-#                                        | query
-#                                    grafana :3000
-#
-# A chave "version:" foi removida de proposito: ela e obsoleta no
-# Compose V2 e gera warning nas versoes recentes.
-#
-# NOTA SOBRE OS HEALTHCHECKS
-# Todas as sondas usam 127.0.0.1 explicitamente, nunca "localhost".
-# Dentro do container, /etc/hosts mapeia localhost para 127.0.0.1 E para
-# ::1. Se o servidor faz bind apenas em IPv4, a sonda pode tentar ::1 e
-# receber "Connection refused" com o servico perfeitamente saudavel.
-# Foi exatamente o que aconteceu com o NGINX ("listen 80" = so IPv4),
-# enquanto Prometheus e Grafana passavam por serem escritos em Go, que
-# faz bind dual-stack por padrao. Fixar IPv4 elimina a dependencia do
-# comportamento de bind de cada servidor.
-# =============================================================================
+# Healthchecks usam 127.0.0.1 e nao localhost: dentro do container localhost
+# tambem resolve para ::1, e o nginx com "listen 80" so escuta em IPv4.
 
 name: projeto-korp
 
-# -----------------------------------------------------------------------------
-# REDE
-# -----------------------------------------------------------------------------
-# external: true significa que a rede NAO e criada pelo compose. Ela e
-# criada antes, pelo Ansible (ou por `docker network create`), exatamente
-# como o item 3 do desafio pede. O compose apenas se conecta a ela.
+# A rede e criada antes, pelo Ansible ou por `docker network create`.
 networks:
   korp-net:
     external: true
@@ -42,9 +17,6 @@ volumes:
 
 services:
 
-  # ---------------------------------------------------------------------------
-  # CONTAINER 1 - aplicacao Go
-  # ---------------------------------------------------------------------------
   http-server-projeto-korp:
     build:
       context: ../app
@@ -59,11 +31,7 @@ services:
     networks:
       - korp-net
 
-    # ATENCAO: nao existe secao "ports" aqui, e isso e proposital.
-    # O desafio exige que este container NAO exponha portas ao host.
-    # A porta 8080 fica acessivel apenas de dentro da rede korp-net,
-    # para o NGINX e para o Prometheus. Se voce precisar depurar,
-    # use `docker exec` ou `docker compose port`, nunca adicione ports aqui.
+    # Sem "ports": a aplicacao so e alcancavel de dentro da rede korp-net.
 
     environment:
       PORT: "8080"
@@ -71,18 +39,15 @@ services:
       TZ: UTC
 
     healthcheck:
-      # Usa o binario Go embutido na imagem (nao ha shell no distroless).
-      # Ele ja aponta para 127.0.0.1 internamente.
       test: ["CMD", "/app/healthcheck"]
       interval: 10s
       timeout: 3s
       retries: 3
       start_period: 5s
 
-    # Endurecimento do container.
     security_opt:
       - no-new-privileges:true
-    read_only: true          # o binario nao escreve em disco
+    read_only: true
     cap_drop:
       - ALL
 
@@ -98,9 +63,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # ---------------------------------------------------------------------------
-  # CONTAINER 2 - NGINX (proxy reverso e unica porta publicada)
-  # ---------------------------------------------------------------------------
   nginx:
     image: nginx:1.27-alpine
     container_name: nginx-projeto-korp
@@ -113,21 +75,15 @@ services:
       - "80:80"
 
     volumes:
-      # Volume exigido pelo desafio. :ro porque o NGINX so precisa ler.
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
 
+    # O nginx resolve o upstream na inicializacao; se subir antes da app
+    # existir falha com "host not found in upstream".
     depends_on:
       http-server-projeto-korp:
-        # Este bloco resolve um problema classico: o NGINX resolve os
-        # hostnames do upstream na inicializacao. Se subir antes da
-        # aplicacao existir, ele falha com "host not found in upstream".
-        # service_healthy garante a ordem correta.
         condition: service_healthy
 
     healthcheck:
-      # 127.0.0.1, nunca localhost: o NGINX usa "listen 80", que faz bind
-      # apenas em IPv4. Com "localhost" a sonda pode tentar ::1 e receber
-      # Connection refused mesmo com o servico funcionando normalmente.
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/nginx-health"]
       interval: 10s
       timeout: 3s
@@ -143,9 +99,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # ---------------------------------------------------------------------------
-  # PROMETHEUS - coleta e armazena as metricas
-  # ---------------------------------------------------------------------------
   prometheus:
     image: prom/prometheus:v2.53.0
     container_name: prometheus-projeto-korp
@@ -155,8 +108,6 @@ services:
       - korp-net
 
     ports:
-      # Exposta para voce inspecionar targets e testar queries PromQL.
-      # Em producao ficaria atras de autenticacao.
       - "9090:9090"
 
     volumes:
@@ -170,13 +121,9 @@ services:
       - --storage.tsdb.retention.time=15d
       - --web.console.libraries=/usr/share/prometheus/console_libraries
       - --web.console.templates=/usr/share/prometheus/consoles
-      # Permite recarregar a config via POST /-/reload sem reiniciar.
       - --web.enable-lifecycle
 
     healthcheck:
-      # Funcionaria com "localhost" porque o Prometheus e Go e faz bind
-      # dual-stack, mas fixamos IPv4 para a sonda nao depender de um
-      # detalhe de implementacao do servidor.
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:9090/-/healthy"]
       interval: 15s
       timeout: 5s
@@ -189,9 +136,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # ---------------------------------------------------------------------------
-  # GRAFANA - visualizacao
-  # ---------------------------------------------------------------------------
   grafana:
     image: grafana/grafana:11.1.0
     container_name: grafana-projeto-korp
@@ -204,28 +148,23 @@ services:
       - "3000:3000"
 
     volumes:
-      # Provisionamento como codigo: datasource e dashboard nascem
-      # prontos, sem nenhum clique na interface. Este e o bonus do desafio.
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana-data:/var/lib/grafana
 
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
-      # Sem telemetria e sem checagem de update na inicializacao.
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
       GF_USERS_ALLOW_SIGN_UP: "false"
-      # Abre direto no dashboard do projeto ao logar.
-      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/http-server-projeto-korp-dashboard.json
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: >-
+        /etc/grafana/provisioning/dashboards/http-server-projeto-korp-dashboard.json
 
     depends_on:
       prometheus:
         condition: service_healthy
 
     healthcheck:
-      # Forma CMD (array) em vez de CMD-SHELL: o "|| exit 1" era redundante,
-      # ja que o proprio wget devolve codigo diferente de zero em falha.
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/api/health"]
       interval: 15s
       timeout: 5s

@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Gera o dashboard do Grafana para o http-server-projeto-korp.
-
-Escrever o JSON via script (em vez de exportar da UI) mantem o arquivo
-legivel, versionavel e comentavel.
-"""
+"""Gera o JSON do dashboard do Grafana em provisioning/dashboards/."""
 import json
 from pathlib import Path
 
@@ -53,28 +49,21 @@ def stat(pid, title, expr, x, y, w, h, unit="none", decimals=None,
             "justifyMode": "auto",
             "orientation": "auto",
             "reduceOptions": {
-                # lastNotNull, nao "lastNonNull": esse e o identificador do
-                # redutor no Grafana. Qualquer outra string e ignorada
-                # silenciosamente e o painel fica sem valor -- o sparkline
-                # ainda desenha, porque usa a serie crua sem passar pelo
-                # redutor, o que torna o sintoma confuso.
+                # O identificador e lastNotNull; qualquer outra string e
+                # ignorada em silencio e o painel fica sem valor.
                 "calcs": ["lastNotNull"],
                 "fields": "",
                 "values": False,
             },
-            # "value" e nao "auto": com "auto" o Grafana desenha nome + valor,
-            # e o nome gerado pelo legendFormat "__auto" e a serie inteira
-            # com todos os labels ({__name__="up", instance=..., job=...}).
-            # Esse nome consome o espaco do painel e o numero nao aparece.
+            # Com "auto" o nome da serie (todos os labels) toma o espaco
+            # do painel e o numero nao aparece.
             "textMode": "value",
             "wideLayout": True,
             "percentChangeColorMode": "standard",
             "showPercentChange": False,
         },
-        # Consulta de INTERVALO, nao instant. Paineis stat com instant=true
-        # nao renderizaram valor no Grafana 11; com range + lastNotNull o
-        # comportamento e identico ao dos paineis de serie temporal, que
-        # funcionam. Menos elegante, mas comprovadamente correto.
+        # Consulta de intervalo: com instant=true os paineis stat nao
+        # renderizaram valor no Grafana 11.
         "targets": [target(expr, instant=False)],
         "pluginVersion": "11.1.0",
     }
@@ -158,9 +147,7 @@ def row(pid, title, y):
 
 panels = []
 
-# =========================================================================
-# LINHA 1 - DISPONIBILIDADE (requisito obrigatorio do desafio)
-# =========================================================================
+# Linha 1: disponibilidade
 panels.append(row(100, "Disponibilidade do Servico", 0))
 
 panels.append(stat(
@@ -229,9 +216,7 @@ panels.append(stat(
     desc="Info metric: o valor e sempre 1, a informacao util esta nos labels.",
     color_mode="none",
 ))
-# Info metric: o valor e sempre 1 e a informacao util esta no label.
-# textMode "name" faz o painel exibir o NOME da serie, e o legendFormat
-# define esse nome como o proprio label version.
+# Exibe o nome da serie, que o legendFormat reduz ao label version.
 panels[-1]["targets"][0]["legendFormat"] = "{{version}}"
 panels[-1]["options"]["textMode"] = "name"
 
@@ -243,9 +228,7 @@ panels.append(timeseries(
     fill=30, draw_style="line", legend_calcs=["mean", "min"],
 ))
 
-# =========================================================================
-# LINHA 2 - VOLUME DE REQUISICOES (requisito obrigatorio do desafio)
-# =========================================================================
+# Linha 2: volume de requisicoes
 panels.append(row(200, "Volume de Requisicoes", 12))
 
 panels.append(stat(
@@ -267,9 +250,8 @@ panels.append(stat(
 
 panels.append(stat(
     9, "Taxa de Erro 5xx (5m)",
-    # "or vector(0)" garante um zero quando nenhum 5xx foi registrado.
-    # Sem isso o numerador nao retorna serie alguma e o painel exibe
-    # "No data" -- que e tecnicamente correto, mas parece defeito.
+    # "or vector(0)": sem nenhum 5xx o numerador seria vazio e o painel
+    # mostraria "No data" em vez de 0.
     ('(sum(rate(korp_http_requests_total{status=~"5.."}[5m])) or vector(0))'
      ' / clamp_min(sum(rate(korp_http_requests_total[5m])), 0.0001) * 100'),
     8, 13, 4, 5, unit="percent", decimals=2,
@@ -300,9 +282,7 @@ panels.append(timeseries(
     desc="Separa 2xx, 4xx e 5xx para distinguir erro do cliente de erro do servidor.",
 ))
 
-# =========================================================================
-# LINHA 3 - LATENCIA E RECURSOS
-# =========================================================================
+# Linha 3: latencia e recursos
 panels.append(row(300, "Latencia e Recursos", 23))
 
 panels.append(timeseries(
@@ -370,7 +350,7 @@ dashboard = {
                     "disponibilidade, volume de requisicoes, latencia e recursos."),
     "editable": True,
     "fiscalYearStartMonth": 0,
-    "graphTooltip": 1,  # crosshair compartilhado entre paineis
+    "graphTooltip": 1,
     "links": [],
     "panels": panels,
     "preload": False,

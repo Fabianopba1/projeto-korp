@@ -1,16 +1,7 @@
-# =============================================================================
-# Configuracao do Prometheus - Projeto Korp
-# =============================================================================
-
 global:
-  # A cada 15s o Prometheus faz GET /metrics em cada target.
-  # Esse intervalo define a resolucao maxima dos graficos.
-  scrape_interval:     15s
+  scrape_interval: 15s
   evaluation_interval: 15s
-  scrape_timeout:      10s
-
-  # Labels anexados a toda metrica que sai deste Prometheus. Importante
-  # quando varias instancias enviam dados para um mesmo destino remoto.
+  scrape_timeout: 10s
   external_labels:
     monitor: projeto-korp
     ambiente: desenvolvimento
@@ -20,12 +11,8 @@ rule_files:
 
 scrape_configs:
 
-  # ---------------------------------------------------------------------------
-  # A aplicacao. Note que o target aponta para o container na porta 8080,
-  # e nao para o NGINX: o Prometheus esta na mesma rede korp-net e fala
-  # direto com o servico. Por isso da para bloquear /metrics no NGINX
-  # sem quebrar a coleta.
-  # ---------------------------------------------------------------------------
+  # Fala direto com o container na 8080, sem passar pelo nginx. Por isso
+  # /metrics pode ficar bloqueado na borda.
   - job_name: http-server-projeto-korp
     metrics_path: /metrics
     scheme: http
@@ -35,17 +22,11 @@ scrape_configs:
         labels:
           servico: http-server-projeto-korp
           camada: aplicacao
-
-    # relabel_configs roda ANTES do scrape e ajusta os labels do target.
     relabel_configs:
       - source_labels: [__address__]
         target_label: instance
         replacement: http-server-projeto-korp:8080
 
-  # ---------------------------------------------------------------------------
-  # O proprio Prometheus. Monitorar o monitor evita o ponto cego classico
-  # de descobrir que a coleta estava parada so quando alguem reclama.
-  # ---------------------------------------------------------------------------
   - job_name: prometheus
     static_configs:
       - targets: ['localhost:9090']

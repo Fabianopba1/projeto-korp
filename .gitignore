@@ -1,35 +1,32 @@
-# Binarios compilados
+# binarios (ancorados para nao casar app/cmd/healthcheck/)
 bin/
 dist/
 *.exe
 *.test
-# Ancorados com / para casar apenas o binário compilado na raiz de app/,
-# e não o diretório app/cmd/healthcheck/ que contém o código-fonte.
 /app/server
 /app/healthcheck
 
-# Cobertura e profiling
+# cobertura e profiling
 *.out
 coverage.*
 *.prof
 
-# Ambiente e segredos
+# ambiente e segredos
 .env
 *.retry
 vault-pass.txt
 *.pem
 *.key
 
-# Colecoes baixadas pelo ansible-galaxy
 ansible/collections/
 
-# Terraform (se voce adicionar a etapa de IaC)
+# terraform
 *.tfstate
 *.tfstate.*
 .terraform/
 *.tfvars
 
-# Editores e SO
+# editores e SO
 .idea/
 .vscode/
 .DS_Store

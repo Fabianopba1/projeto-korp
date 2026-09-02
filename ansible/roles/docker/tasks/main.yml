@@ -1,12 +1,5 @@
 ---
-# =============================================================================
-# Role: docker
-# Requisito da Parte 3: "instalacao do Docker em um ambiente Linux"
-#
-# Instalamos o Docker CE do repositorio oficial, e nao o pacote docker.io
-# das distros, porque o oficial traz o plugin docker-compose-v2 e versoes
-# atualizadas.
-# =============================================================================
+# Instala o Docker CE do repositorio oficial (traz o plugin compose v2).
 
 - name: Falhar cedo se a distribuicao nao for suportada
   ansible.builtin.assert:
@@ -16,9 +9,6 @@
       (Rocky/Alma/CentOS/Fedora). Detectado: {{ ansible_os_family }}.
     success_msg: "Distribuicao suportada: {{ ansible_distribution }} {{ ansible_distribution_version }}"
 
-# -----------------------------------------------------------------------------
-# DEBIAN / UBUNTU
-# -----------------------------------------------------------------------------
 - name: Bloco de instalacao para Debian/Ubuntu
   when: ansible_os_family == 'Debian'
   block:
@@ -31,11 +21,9 @@
           - gnupg
           - apt-transport-https
           - python3-pip
-          # exigido pelo modulo deb822_repository
-          - python3-debian
+          - python3-debian   # exigido por deb822_repository
         state: present
         update_cache: true
-        # Evita rodar apt-get update a cada execucao se o cache for recente.
         cache_valid_time: 3600
 
     - name: Criar diretorio de chaves do apt
@@ -51,12 +39,8 @@
         mode: "0644"
         force: false
 
-    # A chave e referenciada por signed-by: apenas este repositorio confia
-    # nela, em vez de adiciona-la ao chaveiro global do apt.
-    #
-    # deb822_repository substitui o apt_repository, que esta deprecado e
-    # sera removido no ansible-core 2.25. Exige ansible-core >= 2.15 (o
-    # playbook valida isso logo no inicio) e python3-debian no alvo.
+    # deb822_repository substitui o apt_repository deprecado; exige
+    # ansible-core >= 2.15. A chave fica restrita a este repositorio.
     - name: Adicionar o repositorio oficial do Docker (formato deb822)
       ansible.builtin.deb822_repository:
         name: docker
@@ -75,9 +59,6 @@
         state: present
         update_cache: true
 
-# -----------------------------------------------------------------------------
-# RED HAT / ROCKY / ALMA
-# -----------------------------------------------------------------------------
 - name: Bloco de instalacao para RedHat
   when: ansible_os_family == 'RedHat'
   block:
@@ -103,12 +84,6 @@
         name: "{{ docker_packages }}"
         state: present
 
-# -----------------------------------------------------------------------------
-# CONFIGURACAO COMUM
-# -----------------------------------------------------------------------------
-
-# Sem limite de log, os arquivos json de um container de longa duracao
-# crescem ate encher o disco. Este e um dos incidentes mais comuns com Docker.
 - name: Configurar o daemon (rotacao de log e driver de storage)
   ansible.builtin.copy:
     dest: /etc/docker/daemon.json
@@ -125,15 +100,12 @@
       }
   notify: Reiniciar docker
 
-# Handlers so rodam no fim do play. Sem o flush, o restart do daemon
-# aconteceria DEPOIS de a role korp_stack subir a stack e de a validacao
-# passar: os quatro containers cairiam logo apos a mensagem de sucesso.
-# Forcamos o handler aqui, antes de qualquer container existir.
+# Handlers rodam no fim do play. Sem o flush, o restart do daemon
+# aconteceria depois de a stack subir e a validacao passar.
 - name: Aplicar a configuracao do daemon antes de subir containers
   ansible.builtin.meta: flush_handlers
 
-# Necessario para os modulos community.docker.docker_network e docker_image,
-# que conversam com a API do Docker via SDK Python (nao pela CLI).
+# Os modulos community.docker usam o SDK Python, nao a CLI.
 - name: Instalar o SDK Python do Docker (via gerenciador de pacotes)
   ansible.builtin.package:
     name: "{{ docker_sdk_package }}"
@@ -141,8 +113,6 @@
   register: sdk_pkg
   failed_when: false
 
-# Instalar o pacote nao basta: ele pode ser velho demais para a colecao
-# community.docker. Aqui checamos a versao que o Python realmente enxerga.
 - name: Descobrir a versao do SDK efetivamente instalada
   ansible.builtin.command: >-
     {{ ansible_python_interpreter | default('/usr/bin/python3') }}
@@ -157,9 +127,8 @@
       SDK Docker: {{ sdk_versao.stdout | default('ausente') }}
       (minimo exigido: {{ docker_sdk_min_version }})
 
-# Distros recentes marcam o Python do sistema como "externally managed"
-# (PEP 668), incluindo Debian 12+ e Ubuntu 24.04.
-# O --break-system-packages e o escape oficial para esse caso.
+# --break-system-packages: Debian 12+ e Ubuntu 24.04 marcam o Python do
+# sistema como externally managed (PEP 668).
 - name: Instalar ou atualizar o SDK Python do Docker via pip
   ansible.builtin.pip:
     name:
@@ -178,8 +147,7 @@
     enabled: true
     daemon_reload: true
 
-# Permite rodar docker sem sudo. Exige nova sessao de login para valer,
-# por isso o restante do playbook continua usando become.
+# Vale a partir da proxima sessao de login; o playbook segue com become.
 - name: Adicionar o usuario ao grupo docker
   ansible.builtin.user:
     name: "{{ docker_user }}"

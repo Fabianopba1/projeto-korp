@@ -1,17 +1,8 @@
 ---
-# =============================================================================
-# Role: validate
-# Requisito da Parte 3: "validacao do funcionamento do servico desenvolvido
-# atraves de uma requisicao HTTP, e posterior exibicao da resposta no console"
+# Requisicao HTTP de validacao e exibicao da resposta no console.
 #
-# As requisicoes rodam NO HOST ALVO (os modulos uri/wait_for executam no
-# managed node), entao apontar para localhost:80 reproduz literalmente o
-# comando do item 6 do desafio:
-#     curl http://localhost:80/projeto-korp
-#
-# A validacao passa pelo NGINX, e nao direto na aplicacao, porque e esse o
-# caminho que o desafio manda testar.
-# =============================================================================
+# uri e wait_for rodam no host alvo, entao localhost:80 reproduz o
+# `curl http://localhost:80/projeto-korp` do enunciado, passando pelo nginx.
 
 - name: Aguardar a porta 80 aceitar conexoes
   ansible.builtin.wait_for:
@@ -21,9 +12,6 @@
     timeout: 90
     delay: 2
 
-# -----------------------------------------------------------------------------
-# VALIDACAO PRINCIPAL - o endpoint do desafio
-# -----------------------------------------------------------------------------
 - name: "Requisicao HTTP: GET http://localhost:80/projeto-korp"
   ansible.builtin.uri:
     url: "http://{{ korp_validate_host }}:80/projeto-korp"
@@ -31,33 +19,22 @@
     return_content: true
     status_code: 200
   register: resposta_korp
-  # A aplicacao pode levar alguns segundos para aceitar trafego mesmo
-  # depois da porta abrir. Repetir evita falso negativo.
   retries: 10
   delay: 3
   until: resposta_korp.status is defined and resposta_korp.status == 200
 
-# -----------------------------------------------------------------------------
-# CONFERENCIA DO CONTRATO
-# -----------------------------------------------------------------------------
 - name: Validar o contrato do JSON retornado
   ansible.builtin.assert:
     that:
       - resposta_korp.json.nome is defined
       - resposta_korp.json.nome == 'Projeto Korp'
       - resposta_korp.json.horario is defined
-      # Sufixo Z confirma que o horario esta em UTC, como o desafio exige.
       - resposta_korp.json.horario is match('^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$')
     fail_msg: "O JSON retornado nao corresponde ao contrato esperado."
     success_msg: "Contrato validado: campo 'nome' correto e 'horario' em UTC (RFC3339)."
 
-# -----------------------------------------------------------------------------
-# HORARIO RESOLVIDO DINAMICAMENTE
-# -----------------------------------------------------------------------------
-# O desafio exige que o horario seja resolvido a cada requisicao. Como o
-# RFC3339 tem precisao de segundo, duas chamadas imediatas devolveriam a
-# mesma string mesmo com a implementacao correta -- o teste seria
-# inconclusivo. A pausa torna a comparacao deterministica.
+# RFC3339 tem precisao de segundo: sem a pausa, duas chamadas no mesmo
+# segundo devolveriam a mesma string mesmo com a implementacao correta.
 - name: Aguardar mais de um segundo antes da segunda requisicao
   ansible.builtin.pause:
     seconds: "{{ korp_intervalo_teste_dinamico }}"
@@ -75,15 +52,11 @@
     that: resposta_korp.json.horario != resposta_segunda.json.horario
     fail_msg: >-
       As duas requisicoes retornaram o mesmo horario mesmo com
-      {{ korp_intervalo_teste_dinamico }}s de intervalo. O valor esta
-      sendo calculado uma unica vez, e nao a cada requisicao.
+      {{ korp_intervalo_teste_dinamico }}s de intervalo.
     success_msg: >-
       Horario resolvido dinamicamente
       ({{ resposta_korp.json.horario }} -> {{ resposta_segunda.json.horario }}).
 
-# -----------------------------------------------------------------------------
-# VALIDACAO DA STACK DE OBSERVABILIDADE
-# -----------------------------------------------------------------------------
 - name: Verificar se o NGINX bloqueia /metrics na borda
   ansible.builtin.uri:
     url: "http://{{ korp_validate_host }}:80/metrics"
@@ -141,9 +114,6 @@
   register: grafana_dash
   failed_when: false
 
-# -----------------------------------------------------------------------------
-# EXIBICAO DO RESULTADO NO CONSOLE
-# -----------------------------------------------------------------------------
 - name: RESPOSTA DO SERVICO
   ansible.builtin.debug:
     msg:

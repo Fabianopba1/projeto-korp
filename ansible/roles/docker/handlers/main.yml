@@ -1,6 +1,4 @@
 ---
-# Handlers so rodam se alguma task com "notify" reportar changed.
-# Assim o daemon nao e reiniciado a toa em execucoes repetidas.
 - name: Reiniciar docker
   ansible.builtin.systemd:
     name: docker

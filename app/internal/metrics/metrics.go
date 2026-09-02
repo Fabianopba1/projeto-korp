@@ -1,10 +1,6 @@
 // Package metrics concentra a instrumentacao Prometheus do servico.
-//
-// Convencoes seguidas (https://prometheus.io/docs/practices/naming/):
-//   - namespace unico "korp" para evitar colisao com metricas de runtime;
-//   - contadores terminam em _total;
-//   - unidades base no nome (seconds, bytes);
-//   - labels de baixa cardinalidade apenas.
+// Namespace "korp", contadores com sufixo _total, unidades base no nome e
+// apenas labels de baixa cardinalidade.
 package metrics
 
 import (
@@ -20,9 +16,7 @@ import (
 const namespace = "korp"
 
 var (
-	// RequestsTotal atende ao requisito "volume de requisicoes".
-	// Counter e o tipo correto: so cresce e e resiliente a restart
-	// (o Prometheus detecta o reset via rate()/increase()).
+	// Volume de requisicoes (requisito do desafio).
 	RequestsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
@@ -32,9 +26,7 @@ var (
 		[]string{"method", "path", "status"},
 	)
 
-	// RequestDuration permite calcular latencia por quantil no Grafana
-	// via histogram_quantile(). Nao e obrigatorio no desafio, mas e o
-	// terceiro sinal classico (RED: Rate, Errors, Duration).
+	// Latencia por quantil via histogram_quantile().
 	RequestDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
@@ -45,7 +37,6 @@ var (
 		[]string{"method", "path"},
 	)
 
-	// InFlight mostra concorrencia instantanea. Gauge sobe e desce.
 	InFlight = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: namespace,
@@ -54,9 +45,8 @@ var (
 		},
 	)
 
-	// UpTimeSeconds complementa a disponibilidade: permite detectar
-	// restarts (o valor volta a zero) mesmo que o alvo nunca fique down
-	// entre dois scrapes.
+	// Volta a zero num restart: detecta crash loop rapido demais para o
+	// `up` do Prometheus registrar.
 	UpTimeSeconds = prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: namespace,
@@ -66,8 +56,7 @@ var (
 		func() float64 { return time.Since(startedAt).Seconds() },
 	)
 
-	// BuildInfo e o padrao "info metric": valor sempre 1, a informacao
-	// util fica nos labels. Serve para correlacionar versao x incidente.
+	// Info metric: valor sempre 1, a informacao esta nos labels.
 	BuildInfo = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: namespace,
@@ -77,8 +66,6 @@ var (
 		[]string{"version", "commit", "go_version"},
 	)
 
-	// Healthy expoe a disponibilidade percebida pela propria aplicacao.
-	// 1 = pronto para receber trafego, 0 = degradado.
 	Healthy = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: namespace,
@@ -89,13 +76,10 @@ var (
 
 	startedAt = time.Now()
 
-	// Registry proprio em vez do DefaultRegisterer: evita metricas
-	// registradas por dependencias sem que a gente perceba e deixa
-	// explicito tudo que e exposto.
+	// Registry proprio: tudo que e exposto esta listado em Register.
 	Registry = prometheus.NewRegistry()
 )
 
-// Register inscreve todos os coletores no registry da aplicacao.
 func Register(version, commit, goVersion string) {
 	Registry.MustRegister(
 		RequestsTotal,
@@ -104,7 +88,6 @@ func Register(version, commit, goVersion string) {
 		UpTimeSeconds,
 		BuildInfo,
 		Healthy,
-		// Coletores padrao: CPU, memoria, GC, goroutines, file descriptors.
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
@@ -113,7 +96,6 @@ func Register(version, commit, goVersion string) {
 	Healthy.Set(1)
 }
 
-// Handler devolve o handler HTTP do endpoint /metrics.
 func Handler() http.Handler {
 	return promhttp.HandlerFor(Registry, promhttp.HandlerOpts{
 		Registry:          Registry,
@@ -121,8 +103,7 @@ func Handler() http.Handler {
 	})
 }
 
-// statusRecorder captura o status code, que o http.ResponseWriter
-// padrao nao expoe depois de escrito.
+// statusRecorder captura o status code, que o ResponseWriter nao expoe.
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
@@ -133,7 +114,6 @@ func (r *statusRecorder) WriteHeader(code int) {
 	r.ResponseWriter.WriteHeader(code)
 }
 
-// knownMethods e a lista fechada de valores aceitos no label "method".
 var knownMethods = map[string]struct{}{
 	http.MethodGet:     {},
 	http.MethodHead:    {},
@@ -144,12 +124,9 @@ var knownMethods = map[string]struct{}{
 	http.MethodOptions: {},
 }
 
-// normalizeMethod devolve o metodo se ele for conhecido, ou "other".
-//
-// O servidor HTTP do Go aceita qualquer token como metodo (FOOBAR, BAZ...),
-// e cada valor novo criaria uma serie no counter e uma por bucket no
-// histograma. Sem esta normalizacao um cliente conseguiria o mesmo efeito
-// de cardinalidade infinita que o label "path" evita.
+// normalizeMethod limita o label "method" a uma lista fechada. O servidor
+// HTTP do Go aceita qualquer token como metodo, e cada valor novo criaria
+// uma serie no counter e uma por bucket no histograma.
 func normalizeMethod(m string) string {
 	if _, ok := knownMethods[m]; ok {
 		return m
@@ -157,12 +134,8 @@ func normalizeMethod(m string) string {
 	return "other"
 }
 
-// Middleware instrumenta qualquer handler HTTP.
-//
-// Importante: o label "path" recebe a rota registrada (ex: /projeto-korp)
-// e nao r.URL.Path. Usar a URL crua permitiria a um cliente gerar
-// cardinalidade infinita (/a, /b, /c...) e derrubar o Prometheus. O label
-// "method" passa pelo mesmo tratamento em normalizeMethod.
+// Middleware instrumenta um handler. O label "path" recebe a rota
+// registrada, nao r.URL.Path, pelo mesmo motivo de normalizeMethod.
 func Middleware(routePattern string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
