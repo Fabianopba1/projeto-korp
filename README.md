@@ -42,6 +42,11 @@ O único caminho de entrada do tráfego é o NGINX. A aplicação não publica
 portas no host — fica acessível apenas de dentro da rede `korp-net`, para o
 proxy e para o Prometheus.
 
+O ambiente foi validado provisionando uma **VM Debian 13 remota via SSH**, a
+partir de um control node separado. O playbook não assume conexão local: as
+mesmas roles funcionam contra `localhost` ou contra um servidor remoto,
+bastando ajustar o inventário.
+
 ---
 
 ## Estrutura do repositório
@@ -62,11 +67,13 @@ proxy e para o Prometheus.
 │   ├── prometheus/
 │   │   ├── prometheus.yml            configuração de scrape
 │   │   └── alerts.yml                regras de alerta
-│   └── grafana/provisioning/
-│       ├── datasources/datasources.yml
-│       └── dashboards/
-│           ├── dashboards.yml
-│           └── http-server-projeto-korp-dashboard.json
+│   └── grafana/
+│       ├── build_dashboard.py        gerador do dashboard (JSON como código)
+│       └── provisioning/
+│           ├── datasources/datasources.yml
+│           └── dashboards/
+│               ├── dashboards.yml
+│               └── http-server-projeto-korp-dashboard.json
 │
 ├── ansible/
 │   ├── site.yml                      playbook principal
@@ -77,6 +84,9 @@ proxy e para o Prometheus.
 │       ├── korp_stack/               rede, build, configs, containers
 │       └── validate/                 requisição HTTP + saída no console
 │
+├── docs/img/                         capturas do dashboard
+├── preflight.sh                      checa pré-condições antes do deploy
+├── verify.sh                         aceite contra os requisitos do desafio
 └── Makefile                          atalhos (`make help`)
 ```
 
@@ -86,11 +96,12 @@ proxy e para o Prometheus.
 
 **No control node** (a máquina de onde você roda o Ansible):
 
-- Ansible Core >= 2.15
+- Ansible Core >= 2.15 — a role do Docker usa `deb822_repository`
 - Coleções: `make deps`
+- Go 1.22+ apenas para rodar os testes localmente (a build acontece no container)
 
-**No host alvo:** apenas Python 3 e acesso SSH com sudo. O Docker é
-instalado pelo próprio playbook, a partir do repositório oficial.
+**No host alvo:** Python 3, acesso SSH por chave e sudo. O Docker é instalado
+pelo próprio playbook, a partir do repositório oficial.
 
 Distribuições suportadas: família Debian (Debian 11/12/13, Ubuntu 22.04/24.04)
 e família RedHat (Rocky, Alma, CentOS Stream). O playbook lê o codename da
@@ -104,14 +115,9 @@ acordo, então trocar de distro dentro dessas famílias não exige alteração.
 ### Provisionamento completo (o comando único do desafio)
 
 ```bash
-# 1. gere o go.sum (só na primeira vez)
-make tidy
-
-# 2. instale as coleções Ansible
-make deps
-
-# 3. provisione tudo
-make deploy
+make tidy      # gera o go.sum (só na primeira vez)
+make deps      # instala as coleções Ansible
+make deploy    # provisiona tudo
 ```
 
 O alvo `deploy` executa `ansible-playbook site.yml`, que instala o Docker,
@@ -123,10 +129,16 @@ validação com a resposta impressa no console.
 
 Edite `ansible/inventory/hosts.ini`:
 
-- **Local** — provisiona a própria máquina (padrão, útil para testar rápido)
-- **Remoto** — descomente o bloco `korp-vm` e ajuste IP, usuário e chave SSH
+```ini
+[korp]
+korp-devops ansible_host=192.168.0.161 ansible_user=korp ansible_ssh_private_key_file=~/.ssh/id_ed25519_korp
 
-O playbook é idêntico nos dois casos: as roles não assumem que o alvo é local.
+[korp:vars]
+ansible_python_interpreter=/usr/bin/python3
+```
+
+Para provisionar a própria máquina, troque a linha do host por
+`localhost ansible_connection=local`. As roles são idênticas nos dois casos.
 
 ### Sem Ansible (só Docker)
 
@@ -139,21 +151,69 @@ make smoke   # roda o teste do desafio
 
 ## Verificação
 
+O projeto traz dois scripts que separam pré-condições de pós-condições.
+
+### `preflight.sh` — antes de provisionar
+
 ```bash
-curl http://localhost:80/projeto-korp
+./preflight.sh
 ```
 
-```json
-{"nome":"Projeto Korp","horario":"2026-09-01T19:53:10Z"}
+48 verificações: versão do Ansible e coleções, integridade do repositório,
+conectividade SSH e sudo, sistema operacional e recursos do alvo, sincronia
+de relógio via NTP, portas livres, e — o mais importante — **resolução DNS e
+alcance HTTPS aos quatro registries usados na build** (`download.docker.com`,
+`registry-1.docker.io`, `gcr.io` e `proxy.golang.org`).
+
+Testar só um registry não basta: a build puxa a imagem base do Docker Hub, a
+imagem final do gcr.io e os módulos Go do proxy.golang.org. Um bloqueio em
+qualquer um deles quebraria o deploy no meio, com uma mensagem de erro que
+não aponta para a causa.
+
+### `verify.sh` — depois de provisionar
+
+```bash
+./verify.sh
 ```
 
-| Serviço    | URL                                    | Credenciais     |
-|------------|----------------------------------------|-----------------|
-| Aplicação  | http://localhost/projeto-korp          | —               |
-| Prometheus | http://localhost:9090                  | —               |
-| Grafana    | http://localhost:3000                  | `admin`/`admin` |
+32 verificações mapeadas item a item no enunciado. Cada uma imprime qual
+requisito está comprovando, incluindo os fáceis de esquecer: que a aplicação
+**não** publica portas no host, que a imagem do NGINX é a oficial, que o
+volume está exatamente em `/etc/nginx/conf.d/`, que a rede usa driver
+`bridge`, e que o horário muda entre duas requisições **e** confere com o
+relógio real.
 
-Para popular os gráficos antes de olhar o dashboard: `make load`.
+### Idempotência e reprodutibilidade
+
+São coisas diferentes e vale demonstrar as duas:
+
+| Demonstração | Como | O que prova |
+|---|---|---|
+| Idempotência | `make deploy` duas vezes seguidas | a segunda termina com `changed=0` |
+| Reprodutibilidade | restaurar snapshot da VM limpa + `make deploy` | reconstrói o ambiente inteiro do zero |
+
+---
+
+## Dashboard
+
+![Dashboard do Grafana](docs/img/grafana-dashboard.png)
+
+Os três sinais de disponibilidade contam histórias diferentes ao mesmo tempo.
+Na captura acima: `up` indica que o alvo responde ao scrape, a média de 6h
+mostra 100% de tempo no ar, e a taxa de sucesso em 87,80% revela que parte do
+tráfego recebeu erro.
+
+Um serviço pode estar `up` e ainda assim falhar para o cliente. É por isso
+que os três existem.
+
+O JSON do dashboard é **gerado por script**, não exportado da interface. O
+`docker/grafana/build_dashboard.py` produz o arquivo de forma determinística
+e comentada, o que torna as 37 KB de configuração legíveis e revisáveis em
+pull request:
+
+```bash
+cd docker/grafana && ./build_dashboard.py
+```
 
 ---
 
@@ -201,9 +261,9 @@ avg_over_time(up{job="http-server-projeto-korp"}[6h]) * 100
 # requisições por segundo, por rota
 sum by (path) (rate(korp_http_requests_total[5m]))
 
-# taxa de erro 5xx
-sum(rate(korp_http_requests_total{status=~"5.."}[5m]))
-  / sum(rate(korp_http_requests_total[5m]))
+# taxa de erro 5xx (or vector(0) evita "No data" quando não há 5xx)
+(sum(rate(korp_http_requests_total{status=~"5.."}[5m])) or vector(0))
+  / clamp_min(sum(rate(korp_http_requests_total[5m])), 0.0001)
 
 # latência p95
 histogram_quantile(0.95,
@@ -260,7 +320,7 @@ poluiria a métrica de volume.
 `golang:1.22-alpine`; o final é `gcr.io/distroless/static-debian12:nonroot`,
 que contém apenas certificados CA, timezone e `/etc/passwd`. Sem shell, sem
 gerenciador de pacotes, sem coreutils — não há binários para um invasor
-reutilizar após um comprometimento. A imagem final fica em poucos MB.
+reutilizar após um comprometimento. **A imagem final tem 5,9 MB.**
 
 **Ordem das camadas.** `go.mod`/`go.sum` são copiados antes do código-fonte,
 então o download das dependências fica em cache enquanto os manifests não
@@ -297,6 +357,9 @@ hostnames do upstream na inicialização. Se subir antes da aplicação existir,
 falha com `host not found in upstream` e não se recupera sozinho. A condição
 de saúde garante a ordem correta.
 
+**Healthchecks apontam para `127.0.0.1`, nunca `localhost`.** Ver a seção
+"Problemas encontrados" abaixo — foi um bug real neste projeto.
+
 **Endurecimento dos containers.** `no-new-privileges`, `cap_drop: ALL`,
 `read_only` no filesystem da aplicação, limites de CPU e memória, e rotação
 de log configurada (`max-size` + `max-file`) — disco cheio por log de
@@ -328,18 +391,46 @@ desenvolvimento: `--tags validate`.
 **Repositório oficial do Docker,** não o pacote `docker.io` das distros —
 traz o plugin `docker-compose-v2` e versões atualizadas. A chave GPG é
 adicionada com `signed-by`, restrita a esse repositório, em vez de ir para o
-chaveiro global.
+chaveiro global. O repositório é declarado com `deb822_repository`, que
+substitui o `apt_repository` deprecado.
+
+**`docker_image_build` em vez de `docker_image`.** O primeiro usa
+`docker buildx` (BuildKit); o segundo fala com a API clássica do Engine, cujo
+builder legado não suporta `RUN --mount=type=cache`. Ver "Problemas
+encontrados".
+
+**Verificação de versão do SDK Python.** Não basta instalar `python3-docker`:
+o pacote da distro pode ser antigo demais para a coleção `community.docker`.
+O playbook consulta a versão que o Python realmente enxerga e recorre ao pip
+(com `--break-system-packages`, o escape oficial para o PEP 668) apenas
+quando necessário.
+
+**A estrutura no host alvo espelha a do repositório.** `/opt/projeto-korp/app`
+e `/opt/projeto-korp/docker/...`, de modo que todos os caminhos relativos do
+compose resolvem igual dos dois lados. Como efeito colateral útil, dá para
+entrar na VM e rodar `cd /opt/projeto-korp/docker && docker compose ps`
+exatamente como se faria localmente.
 
 **Idempotência.** Handlers só disparam quando algo realmente muda; o
 `nginx -s reload` recarrega a configuração sem derrubar conexões, e o
 Prometheus recarrega via `POST /-/reload`. Uma segunda execução do playbook
-não deve reportar nenhum `changed`.
+reporta `changed=0`.
 
 **Validação que realmente valida.** A role `validate` não se contenta com
 HTTP 200: confere o campo `nome`, valida o formato do horário com regex
-exigindo o sufixo `Z` (UTC), faz duas requisições para provar que o valor é
-dinâmico, verifica que `/metrics` está bloqueado na borda, e confirma que o
-datasource e o dashboard foram provisionados no Grafana.
+exigindo o sufixo `Z` (UTC), faz duas requisições **com 2 segundos de
+intervalo** para provar que o valor é dinâmico, verifica que `/metrics` está
+bloqueado na borda, e confirma que o datasource e o dashboard foram
+provisionados no Grafana.
+
+O intervalo importa: o RFC3339 tem precisão de segundo, então duas
+requisições imediatas devolveriam a mesma string mesmo com a implementação
+correta. Sem a pausa, o teste seria inconclusivo — e um teste que não pode
+falhar de verdade não testa nada.
+
+As requisições rodam **no host alvo** (os módulos `uri` e `wait_for` executam
+no managed node), então apontar para `localhost:80` reproduz literalmente o
+`curl http://localhost:80/projeto-korp` do enunciado.
 
 ### Grafana
 
@@ -348,8 +439,86 @@ o item bônus do desafio. O `uid` do datasource é fixo (`prometheus-korp`)
 porque o JSON do dashboard o referencia; sem fixar, o Grafana geraria um uid
 aleatório e os painéis ficariam órfãos.
 
-O dashboard foi escrito como código e gerado por script, não exportado da
-interface. Fica legível, versionável e revisável em pull request.
+---
+
+## Problemas encontrados e resolvidos
+
+Quatro bugs reais apareceram durante o provisionamento. Estão documentados
+porque o raciocínio de diagnóstico importa tanto quanto o resultado.
+
+### 1. `--mount` requer BuildKit
+
+**Sintoma:** o playbook falhava no `Step 5/20` com
+`the --mount option requires BuildKit`.
+
+**Causa:** o Dockerfile usa `RUN --mount=type=cache` para cachear os módulos
+Go, sintaxe exclusiva do BuildKit. O módulo `community.docker.docker_image`
+conversa com a API clássica do Docker Engine, cujo builder legado é de 2013 e
+não entende `--mount`.
+
+**Detalhe que engana:** na linha de comando o mesmo Dockerfile funciona,
+porque desde o Docker 23 o `docker build` já usa buildx por padrão. A
+diferença só aparece pela API — exatamente o tipo de armadilha que surge ao
+automatizar algo que funcionava manualmente.
+
+**Correção:** trocar para `community.docker.docker_image_build`, que invoca
+`docker buildx build`.
+
+### 2. Contexto de build apontando para fora
+
+**Sintoma:** latente, ainda não tinha se manifestado.
+
+**Causa:** o `docker-compose.yml` declara `build.context: ../app`. No
+repositório o compose fica em `docker/`, então `../app` resolve corretamente.
+Mas a role copiava o compose para a **raiz** de `/opt/projeto-korp/`, onde
+`../app` vira `/opt/app` — inexistente.
+
+Não quebrou de imediato porque a imagem é construída em uma task separada e o
+compose apenas a reutiliza. Quebraria no primeiro `docker compose up --build`
+executado na VM.
+
+**Correção:** espelhar a estrutura do repositório no host alvo.
+
+### 3. NGINX saudável, healthcheck falhando
+
+**Sintoma:** `container nginx-projeto-korp is unhealthy`, mas
+`curl http://localhost:80/projeto-korp` respondia normalmente.
+
+**Diagnóstico:** dentro do container, `wget http://127.0.0.1/nginx-health`
+funcionava e `wget http://localhost/nginx-health` falhava com
+`Connection refused`.
+
+A mensagem foi decisiva: recusa significa que o pacote chegou e não havia
+ninguém escutando — se fosse resolução de nome, seria "bad address". O
+`/etc/hosts` do container mapeia `localhost` para `127.0.0.1` **e** para
+`::1`, e o NGINX com `listen 80` faz bind apenas em IPv4.
+
+Prometheus e Grafana passavam no mesmo teste por serem escritos em Go, que
+faz bind dual-stack por padrão. Mesma imagem base, mesmo `wget`,
+comportamento diferente por causa da linguagem do servidor.
+
+**Correção:** fixar `127.0.0.1` em todas as sondas, não só na que quebrou —
+corrigir a classe do problema em vez do sintoma isolado.
+
+### 4. Painéis do Grafana sem valor
+
+**Sintoma:** todos os painéis de série temporal funcionavam; todos os painéis
+`stat` ficavam em branco. Alguns exibiam o sparkline mas nenhum número.
+
+**Causa:** o identificador do redutor estava escrito como `lastNonNull`. O
+nome correto no Grafana é `lastNotNull`. Qualquer outra string é ignorada
+silenciosamente e o painel não produz valor.
+
+**Por que o sintoma confundia:** o sparkline desenha a série crua, sem passar
+pelo redutor. Dois caminhos independentes dentro do mesmo painel, e só um
+quebrado — o que fez parecer problema de renderização de texto.
+
+**A pista estava na própria tela:** as legendas dos painéis de série temporal
+mostravam a coluna "Last \*" com valores. Ali o identificador estava correto.
+Bastava comparar as duas grafias no mesmo arquivo.
+
+**Lição aplicável:** quando parte de um componente funciona e parte não,
+compare os dois caminhos internos antes de mexer na configuração externa.
 
 ---
 
@@ -357,8 +526,14 @@ interface. Fica legível, versionável e revisável em pull request.
 
 Escolhas conscientes de escopo, não descuidos:
 
-- **Credenciais do Grafana em texto plano.** `admin`/`admin` via variável.
-  Em produção isso viria de `ansible-vault`, Vault ou SSM.
+- **`sudo` sem senha para o usuário de automação.** O enunciado pede
+  provisionamento com um único comando; com senha, seria preciso `-K`.
+  Mitigações: usuário dedicado exclusivamente à automação, host de
+  laboratório isolado em VLAN própria, acesso SSH apenas por chave dedicada,
+  sem exposição externa. Em produção: escopo restrito de comandos no
+  `sudoers` ou credencial em cofre.
+- **Credenciais do Grafana em texto plano.** `admin`/`admin` via variável de
+  ambiente. Em produção isso viria de `ansible-vault`, Vault ou SSM.
 - **Sem TLS.** O desafio pede HTTP na porta 80. Em produção o NGINX
   terminaria TLS com certificado do Let's Encrypt.
 - **Sem Alertmanager.** As regras de alerta existem e ficam visíveis em
@@ -373,13 +548,17 @@ Escolhas conscientes de escopo, não descuidos:
 
 O que eu faria com mais tempo, em ordem de prioridade:
 
-1. **Pipeline de CI** — lint, testes, build da imagem e scan de
+1. **Role de hardening** — `PasswordAuthentication no` no sshd (com
+   `validate: sshd -t -f %s` para nunca escrever config quebrada) e
+   `authorized_key` com `exclusive: true`, garantindo que só a chave de
+   automação tenha acesso mesmo após um rollback
+2. **Pipeline de CI** — lint, testes, build da imagem e scan de
    vulnerabilidades (Trivy) a cada push
-2. **Provisionamento da VM com Terraform/OpenTofu** — infraestrutura e
+3. **Credenciais em `ansible-vault`**, eliminando senhas do repositório
+4. **Provisionamento da VM com Terraform/OpenTofu** — infraestrutura e
    configuração ambas como código
-3. **Alertmanager** com notificação real
-4. **TLS** com certificado automatizado
-5. **Testes de integração** subindo a stack completa via Testcontainers
+5. **Alertmanager** com notificação real
+6. **Testes de integração** subindo a stack completa via Testcontainers
 
 ---
 
@@ -390,9 +569,13 @@ make help       lista todos os alvos
 make tidy       gera o go.sum
 make test       roda os testes unitários
 make deps       instala as coleções Ansible
+make check      valida a sintaxe do playbook
 make deploy     provisiona o ambiente inteiro
 make up         sobe a stack só com Docker
 make smoke      executa o teste do desafio
 make load       gera tráfego para o dashboard
 make destroy    remove tudo
+
+./preflight.sh  verifica pré-condições antes do deploy
+./verify.sh     verifica o resultado contra os requisitos
 ```

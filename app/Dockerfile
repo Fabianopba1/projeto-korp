@@ -57,7 +57,7 @@ FROM gcr.io/distroless/static-debian12:nonroot
 # Metadados no padrao OCI. Ficam visiveis em `docker inspect`.
 LABEL org.opencontainers.image.title="http-server-projeto-korp" \
       org.opencontainers.image.description="Servico HTTP em Go do desafio Korp" \
-      org.opencontainers.image.source="https://github.com/SEU_USUARIO/projeto-korp" \
+      org.opencontainers.image.source="https://github.com/Fabianopba1/projeto-korp" \
       org.opencontainers.image.licenses="MIT"
 
 WORKDIR /app
