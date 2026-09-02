@@ -4,9 +4,13 @@
 # Requisito da Parte 3: "validacao do funcionamento do servico desenvolvido
 # atraves de uma requisicao HTTP, e posterior exibicao da resposta no console"
 #
-# A validacao passa pelo NGINX (porta 80), e nao direto na aplicacao,
-# porque e exatamente o caminho que o desafio manda testar:
-#   curl http://localhost:80/projeto-korp
+# As requisicoes rodam NO HOST ALVO (os modulos uri/wait_for executam no
+# managed node), entao apontar para localhost:80 reproduz literalmente o
+# comando do item 6 do desafio:
+#     curl http://localhost:80/projeto-korp
+#
+# A validacao passa pelo NGINX, e nao direto na aplicacao, porque e esse o
+# caminho que o desafio manda testar.
 # =============================================================================
 
 - name: Aguardar a porta 80 aceitar conexoes
@@ -20,7 +24,7 @@
 # -----------------------------------------------------------------------------
 # VALIDACAO PRINCIPAL - o endpoint do desafio
 # -----------------------------------------------------------------------------
-- name: "Requisicao HTTP: GET http://{{ korp_validate_host }}:80/projeto-korp"
+- name: "Requisicao HTTP: GET http://localhost:80/projeto-korp"
   ansible.builtin.uri:
     url: "http://{{ korp_validate_host }}:80/projeto-korp"
     method: GET
@@ -47,24 +51,35 @@
     fail_msg: "O JSON retornado nao corresponde ao contrato esperado."
     success_msg: "Contrato validado: campo 'nome' correto e 'horario' em UTC (RFC3339)."
 
-- name: Confirmar que o horario e resolvido dinamicamente
+# -----------------------------------------------------------------------------
+# HORARIO RESOLVIDO DINAMICAMENTE
+# -----------------------------------------------------------------------------
+# O desafio exige que o horario seja resolvido a cada requisicao. Como o
+# RFC3339 tem precisao de segundo, duas chamadas imediatas devolveriam a
+# mesma string mesmo com a implementacao correta -- o teste seria
+# inconclusivo. A pausa torna a comparacao deterministica.
+- name: Aguardar mais de um segundo antes da segunda requisicao
+  ansible.builtin.pause:
+    seconds: "{{ korp_intervalo_teste_dinamico }}"
+
+- name: Segunda requisicao para comparar o horario
   ansible.builtin.uri:
     url: "http://{{ korp_validate_host }}:80/projeto-korp"
     method: GET
     return_content: true
+    status_code: 200
   register: resposta_segunda
 
-- name: Comparar as duas respostas
+- name: Confirmar que o horario muda entre requisicoes
   ansible.builtin.assert:
     that: resposta_korp.json.horario != resposta_segunda.json.horario
     fail_msg: >-
-      As duas requisicoes retornaram o mesmo horario. O valor pode estar
+      As duas requisicoes retornaram o mesmo horario mesmo com
+      {{ korp_intervalo_teste_dinamico }}s de intervalo. O valor esta
       sendo calculado uma unica vez, e nao a cada requisicao.
-    success_msg: "Horario muda entre requisicoes: resolucao dinamica confirmada."
-  # Duas requisicoes no mesmo segundo produzem o mesmo valor em RFC3339
-  # (precisao de 1s). Nesse caso o teste e inconclusivo, nao uma falha.
-  ignore_errors: true
-  register: teste_dinamico
+    success_msg: >-
+      Horario resolvido dinamicamente
+      ({{ resposta_korp.json.horario }} -> {{ resposta_segunda.json.horario }}).
 
 # -----------------------------------------------------------------------------
 # VALIDACAO DA STACK DE OBSERVABILIDADE
@@ -133,7 +148,7 @@
   ansible.builtin.debug:
     msg:
       - "=================================================================="
-      - "  GET http://{{ korp_validate_host }}:80/projeto-korp"
+      - "  GET http://localhost:80/projeto-korp   (executado em {{ inventory_hostname }})"
       - "=================================================================="
       - "  HTTP {{ resposta_korp.status }}"
       - "  Content-Type: {{ resposta_korp.content_type | default('n/d') }}"
@@ -152,19 +167,20 @@
       - "=================================================================="
       - "  Aplicacao via NGINX  : {{ 'OK' if resposta_korp.status == 200 else 'FALHA' }}"
       - "  Contrato JSON        : OK (nome + horario em UTC)"
-      - "  Horario dinamico     : {{ 'confirmado' if not teste_dinamico.failed else 'inconclusivo (mesmo segundo)' }}"
+      - "  Horario dinamico     : OK ({{ resposta_korp.json.horario }} -> {{ resposta_segunda.json.horario }})"
       - "  /metrics protegido   : {{ 'OK (bloqueado na borda)' if metrics_bloqueado.status in [403, 404] else 'ATENCAO: exposto' }}"
       - "  Prometheus coletando : {{ 'OK' if prom_targets.status | default(0) == 200 else 'FALHA' }}"
       - "  Grafana              : {{ grafana_health.json.database | default('FALHA') }}"
       - "  Datasource           : {{ 'provisionado' if grafana_ds.status | default(0) == 200 else 'FALHA' }}"
       - "  Dashboard            : {{ 'provisionado' if grafana_dash.status | default(0) == 200 else 'FALHA' }}"
       - "------------------------------------------------------------------"
-      - "  Servico     http://{{ korp_validate_host }}/projeto-korp"
-      - "  Prometheus  http://{{ korp_validate_host }}:9090"
-      - "  Grafana     http://{{ korp_validate_host }}:3000  ({{ korp_grafana_user }} / {{ korp_grafana_password }})"
+      - "  Servico     http://{{ korp_display_host }}/projeto-korp"
+      - "  Prometheus  http://{{ korp_display_host }}:9090"
+      - "  Grafana     http://{{ korp_display_host }}:3000  ({{ korp_grafana_user }} / {{ korp_grafana_password }})"
       - "=================================================================="
 
 - name: Falhar o playbook se a validacao principal nao passou
   ansible.builtin.assert:
     that: resposta_korp.status == 200
     fail_msg: "O servico nao respondeu corretamente na porta 80."
+    success_msg: "Validacao concluida com sucesso."

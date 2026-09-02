@@ -1,6 +1,28 @@
 ---
-# Host usado nas validacoes. Em conexao local e sempre localhost; para
-# alvo remoto, usa o IP do inventario.
-korp_validate_host: "{{ 'localhost' if ansible_connection == 'local' else ansible_host | default(inventory_hostname) }}"
+# =============================================================================
+# Defaults da role validate
+# =============================================================================
+
+# Endereco usado NAS REQUISICOES de validacao.
+#
+# Os modulos uri e wait_for rodam no HOST ALVO, nao no control node. Entao
+# "localhost" aqui e o proprio korp-devops -- que e exatamente o
+# `curl http://localhost:80/projeto-korp` que o item 6 do desafio manda
+# executar. Validar pelo IP externo daria a volta pela rede sem necessidade.
+#
+# A versao anterior testava `ansible_connection == 'local'`, mas essa
+# variavel so existe quando declarada explicitamente no inventario, o que
+# gerava "'ansible_connection' is undefined" e poluia o nome da task.
+korp_validate_host: localhost
+
+# Endereco exibido nos links do resumo final, que voce abre no navegador a
+# partir de outra maquina. Aqui sim queremos o IP real do host alvo.
+korp_display_host: "{{ ansible_host | default(inventory_hostname) }}"
+
+# Intervalo entre as duas requisicoes do teste de horario dinamico.
+# Precisa ser > 1s porque o RFC3339 tem precisao de segundo: duas chamadas
+# no mesmo segundo devolvem a mesma string mesmo com o servico correto.
+korp_intervalo_teste_dinamico: 2
+
 korp_grafana_user: admin
 korp_grafana_password: admin
