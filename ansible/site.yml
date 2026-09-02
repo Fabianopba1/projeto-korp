@@ -1,0 +1,64 @@
+---
+# =============================================================================
+# PLAYBOOK PRINCIPAL - Desafio DevOps Korp
+#
+# Provisiona o ambiente inteiro (Partes 1, 2 e 3) com um unico comando:
+#
+#   ansible-playbook site.yml
+#
+# Ordem das roles:
+#   docker      -> instala e configura o Docker Engine
+#   korp_stack  -> rede bridge, build da imagem, configs e containers
+#   validate    -> requisicao HTTP de validacao e exibicao no console
+#
+# Execucao parcial por tags, util durante o desenvolvimento:
+#   ansible-playbook site.yml --tags validate
+#   ansible-playbook site.yml --skip-tags docker
+# =============================================================================
+
+- name: Provisionar o ambiente do Projeto Korp
+  hosts: korp
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Exibir o alvo do provisionamento
+      ansible.builtin.debug:
+        msg: >-
+          Provisionando {{ inventory_hostname }}
+          ({{ ansible_distribution }} {{ ansible_distribution_version }},
+          {{ ansible_architecture }})
+      tags: always
+
+    - name: Verificar se o codigo-fonte esta acessivel no control node
+      ansible.builtin.stat:
+        path: "{{ korp_repo_dir }}/app/main.go"
+      delegate_to: localhost
+      become: false
+      register: fonte_stat
+      tags: always
+
+    - name: Falhar cedo se o repositorio nao for encontrado
+      ansible.builtin.assert:
+        that: fonte_stat.stat.exists
+        fail_msg: >-
+          Nao encontrei {{ korp_repo_dir }}/app/main.go.
+          Execute o playbook de dentro do diretorio ansible/ do repositorio.
+        success_msg: "Codigo-fonte localizado em {{ korp_repo_dir }}"
+      tags: always
+
+  roles:
+    - role: docker
+      tags: [docker, install]
+
+    - role: korp_stack
+      tags: [stack, deploy]
+
+    - role: validate
+      tags: [validate, test]
+
+  post_tasks:
+    - name: Provisionamento concluido
+      ansible.builtin.debug:
+        msg: "Ambiente Projeto Korp provisionado com sucesso em {{ inventory_hostname }}."
+      tags: always

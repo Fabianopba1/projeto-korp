@@ -1,0 +1,34 @@
+# Binarios compilados
+bin/
+dist/
+*.exe
+*.test
+server
+healthcheck
+
+# Cobertura e profiling
+*.out
+coverage.*
+*.prof
+
+# Ambiente e segredos
+.env
+*.retry
+vault-pass.txt
+*.pem
+*.key
+
+# Colecoes baixadas pelo ansible-galaxy
+ansible/collections/
+
+# Terraform (se voce adicionar a etapa de IaC)
+*.tfstate
+*.tfstate.*
+.terraform/
+*.tfvars
+
+# Editores e SO
+.idea/
+.vscode/
+.DS_Store
+*.swp

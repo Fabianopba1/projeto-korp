@@ -1,0 +1,220 @@
+# =============================================================================
+# Stack do desafio Korp
+#
+#   internet --> :80 nginx --> :8080 http-server-projeto-korp
+#                                        ^
+#                                        | scrape /metrics
+#                                   prometheus :9090
+#                                        ^
+#                                        | query
+#                                    grafana :3000
+#
+# A chave "version:" foi removida de proposito: ela e obsoleta no
+# Compose V2 e gera warning nas versoes recentes.
+# =============================================================================
+
+name: projeto-korp
+
+# -----------------------------------------------------------------------------
+# REDE
+# -----------------------------------------------------------------------------
+# external: true significa que a rede NAO e criada pelo compose. Ela e
+# criada antes, pelo Ansible (ou por `docker network create`), exatamente
+# como o item 3 do desafio pede. O compose apenas se conecta a ela.
+networks:
+  korp-net:
+    external: true
+    name: ${KORP_NETWORK:-korp-net}
+
+volumes:
+  prometheus-data:
+  grafana-data:
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # CONTAINER 1 - aplicacao Go
+  # ---------------------------------------------------------------------------
+  http-server-projeto-korp:
+    build:
+      context: ../app
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${APP_VERSION:-1.0.0}
+        COMMIT: ${APP_COMMIT:-local}
+    image: http-server-projeto-korp:${APP_VERSION:-1.0.0}
+    container_name: http-server-projeto-korp
+    restart: unless-stopped
+
+    networks:
+      - korp-net
+
+    # ATENCAO: nao existe secao "ports" aqui, e isso e proposital.
+    # O desafio exige que este container NAO exponha portas ao host.
+    # A porta 8080 fica acessivel apenas de dentro da rede korp-net,
+    # para o NGINX e para o Prometheus. Se voce precisar depurar,
+    # use `docker exec` ou `docker compose port`, nunca adicione ports aqui.
+
+    environment:
+      PORT: "8080"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TZ: UTC
+
+    healthcheck:
+      # Usa o binario Go embutido na imagem (nao ha shell no distroless).
+      test: ["CMD", "/app/healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+    # Endurecimento do container.
+    security_opt:
+      - no-new-privileges:true
+    read_only: true          # o binario nao escreve em disco
+    cap_drop:
+      - ALL
+
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 128M
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # CONTAINER 2 - NGINX (proxy reverso e unica porta publicada)
+  # ---------------------------------------------------------------------------
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: nginx-projeto-korp
+    restart: unless-stopped
+
+    networks:
+      - korp-net
+
+    ports:
+      - "80:80"
+
+    volumes:
+      # Volume exigido pelo desafio. :ro porque o NGINX so precisa ler.
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+
+    depends_on:
+      http-server-projeto-korp:
+        # Este bloco resolve um problema classico: o NGINX resolve os
+        # hostnames do upstream na inicializacao. Se subir antes da
+        # aplicacao existir, ele falha com "host not found in upstream".
+        # service_healthy garante a ordem correta.
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost/nginx-health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+    security_opt:
+      - no-new-privileges:true
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # PROMETHEUS - coleta e armazena as metricas
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: prometheus-projeto-korp
+    restart: unless-stopped
+
+    networks:
+      - korp-net
+
+    ports:
+      # Exposta para voce inspecionar targets e testar queries PromQL.
+      # Em producao ficaria atras de autenticacao.
+      - "9090:9090"
+
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.console.libraries=/usr/share/prometheus/console_libraries
+      - --web.console.templates=/usr/share/prometheus/consoles
+      # Permite recarregar a config via POST /-/reload sem reiniciar.
+      - --web.enable-lifecycle
+
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # GRAFANA - visualizacao
+  # ---------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: grafana-projeto-korp
+    restart: unless-stopped
+
+    networks:
+      - korp-net
+
+    ports:
+      - "3000:3000"
+
+    volumes:
+      # Provisionamento como codigo: datasource e dashboard nascem
+      # prontos, sem nenhum clique na interface. Este e o bonus do desafio.
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      # Sem telemetria e sem checagem de update na inicializacao.
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # Abre direto no dashboard do projeto ao logar.
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/http-server-projeto-korp-dashboard.json
+
+    depends_on:
+      prometheus:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

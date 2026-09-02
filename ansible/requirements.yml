@@ -1,0 +1,9 @@
+---
+# Colecoes necessarias. Instale com:
+#   ansible-galaxy collection install -r requirements.yml
+collections:
+  # docker_compose_v2 (usado aqui) exige >= 3.6
+  - name: community.docker
+    version: ">=3.10.0"
+  - name: ansible.posix
+    version: ">=1.5.4"

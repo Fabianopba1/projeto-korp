@@ -1,0 +1,6 @@
+---
+# Host usado nas validacoes. Em conexao local e sempre localhost; para
+# alvo remoto, usa o IP do inventario.
+korp_validate_host: "{{ 'localhost' if ansible_connection == 'local' else ansible_host | default(inventory_hostname) }}"
+korp_grafana_user: admin
+korp_grafana_password: admin

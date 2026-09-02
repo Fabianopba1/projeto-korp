@@ -1,0 +1,197 @@
+---
+# =============================================================================
+# Role: docker
+# Requisito da Parte 3: "instalacao do Docker em um ambiente Linux"
+#
+# Instalamos o Docker CE do repositorio oficial, e nao o pacote docker.io
+# das distros, porque o oficial traz o plugin docker-compose-v2 e versoes
+# atualizadas.
+# =============================================================================
+
+- name: Falhar cedo se a distribuicao nao for suportada
+  ansible.builtin.assert:
+    that: ansible_os_family in ['Debian', 'RedHat']
+    fail_msg: >-
+      Esta role suporta apenas familias Debian (Ubuntu/Debian) e RedHat
+      (Rocky/Alma/CentOS/Fedora). Detectado: {{ ansible_os_family }}.
+    success_msg: "Distribuicao suportada: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+
+# -----------------------------------------------------------------------------
+# DEBIAN / UBUNTU
+# -----------------------------------------------------------------------------
+- name: Bloco de instalacao para Debian/Ubuntu
+  when: ansible_os_family == 'Debian'
+  block:
+
+    - name: Instalar pre-requisitos do apt
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - apt-transport-https
+          - python3-pip
+          # exigido pelo modulo deb822_repository
+          - python3-debian
+        state: present
+        update_cache: true
+        # Evita rodar apt-get update a cada execucao se o cache for recente.
+        cache_valid_time: 3600
+
+    - name: Criar diretorio de chaves do apt
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    - name: Baixar a chave GPG oficial do Docker
+      ansible.builtin.get_url:
+        url: "https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg"
+        dest: /etc/apt/keyrings/docker.asc
+        mode: "0644"
+        force: false
+
+    # A chave e referenciada por signed-by: apenas este repositorio confia
+    # nela, em vez de adiciona-la ao chaveiro global do apt.
+    #
+    # deb822_repository substitui o apt_repository, que esta deprecado e
+    # sera removido no ansible-core 2.25. Exige ansible-core >= 2.15 (o
+    # playbook valida isso logo no inicio) e python3-debian no alvo.
+    - name: Adicionar o repositorio oficial do Docker (formato deb822)
+      ansible.builtin.deb822_repository:
+        name: docker
+        types: [deb]
+        uris: "https://download.docker.com/linux/{{ ansible_distribution | lower }}"
+        suites: ["{{ ansible_distribution_release }}"]
+        components: [stable]
+        architectures: ["{{ docker_apt_arch }}"]
+        signed_by: /etc/apt/keyrings/docker.asc
+        state: present
+        enabled: true
+
+    - name: Instalar Docker Engine e plugins
+      ansible.builtin.apt:
+        name: "{{ docker_packages }}"
+        state: present
+        update_cache: true
+
+# -----------------------------------------------------------------------------
+# RED HAT / ROCKY / ALMA
+# -----------------------------------------------------------------------------
+- name: Bloco de instalacao para RedHat
+  when: ansible_os_family == 'RedHat'
+  block:
+
+    - name: Instalar dnf-plugins-core
+      ansible.builtin.dnf:
+        name:
+          - dnf-plugins-core
+          - python3-pip
+        state: present
+
+    - name: Adicionar o repositorio oficial do Docker
+      ansible.builtin.yum_repository:
+        name: docker-ce-stable
+        description: Docker CE Stable
+        baseurl: "https://download.docker.com/linux/centos/$releasever/$basearch/stable"
+        gpgcheck: true
+        gpgkey: https://download.docker.com/linux/centos/gpg
+        enabled: true
+
+    - name: Instalar Docker Engine e plugins
+      ansible.builtin.dnf:
+        name: "{{ docker_packages }}"
+        state: present
+
+# -----------------------------------------------------------------------------
+# CONFIGURACAO COMUM
+# -----------------------------------------------------------------------------
+
+# Sem limite de log, os arquivos json de um container de longa duracao
+# crescem ate encher o disco. Este e um dos incidentes mais comuns com Docker.
+- name: Configurar o daemon (rotacao de log e driver de storage)
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    mode: "0644"
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": {
+          "max-size": "10m",
+          "max-file": "3"
+        },
+        "storage-driver": "overlay2",
+        "live-restore": true
+      }
+  notify: Reiniciar docker
+
+# Necessario para os modulos community.docker.docker_network e docker_image,
+# que conversam com a API do Docker via SDK Python (nao pela CLI).
+- name: Instalar o SDK Python do Docker (via gerenciador de pacotes)
+  ansible.builtin.package:
+    name: "{{ docker_sdk_package }}"
+    state: present
+  register: sdk_pkg
+  failed_when: false
+
+# Instalar o pacote nao basta: ele pode ser velho demais para a colecao
+# community.docker. Aqui checamos a versao que o Python realmente enxerga.
+- name: Descobrir a versao do SDK efetivamente instalada
+  ansible.builtin.command: >-
+    {{ ansible_python_interpreter | default('/usr/bin/python3') }}
+    -c "import docker; print(docker.__version__)"
+  register: sdk_versao
+  changed_when: false
+  failed_when: false
+
+- name: Exibir o diagnostico do SDK
+  ansible.builtin.debug:
+    msg: >-
+      SDK Docker: {{ sdk_versao.stdout | default('ausente') }}
+      (minimo exigido: {{ docker_sdk_min_version }})
+
+# Distros recentes marcam o Python do sistema como "externally managed"
+# (PEP 668), incluindo Debian 12+ e Ubuntu 24.04.
+# O --break-system-packages e o escape oficial para esse caso.
+- name: Instalar ou atualizar o SDK Python do Docker via pip
+  ansible.builtin.pip:
+    name:
+      - "docker>={{ docker_sdk_min_version }}"
+      - requests>=2.31.0
+    state: present
+    extra_args: --break-system-packages
+  when: >-
+    sdk_versao.rc != 0
+    or sdk_versao.stdout is not version(docker_sdk_min_version, '>=')
+
+- name: Garantir que o servico Docker esteja iniciado e habilitado no boot
+  ansible.builtin.systemd:
+    name: docker
+    state: started
+    enabled: true
+    daemon_reload: true
+
+# Permite rodar docker sem sudo. Exige nova sessao de login para valer,
+# por isso o restante do playbook continua usando become.
+- name: Adicionar o usuario ao grupo docker
+  ansible.builtin.user:
+    name: "{{ docker_user }}"
+    groups: docker
+    append: true
+  when: docker_user | length > 0
+
+- name: Coletar a versao instalada do Docker
+  ansible.builtin.command: docker --version
+  register: docker_version_out
+  changed_when: false
+
+- name: Coletar a versao do plugin Compose
+  ansible.builtin.command: docker compose version
+  register: compose_version_out
+  changed_when: false
+
+- name: Exibir as versoes instaladas
+  ansible.builtin.debug:
+    msg:
+      - "{{ docker_version_out.stdout }}"
+      - "{{ compose_version_out.stdout }}"

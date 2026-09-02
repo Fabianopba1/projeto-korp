@@ -1,0 +1,24 @@
+---
+# Pacotes do Docker CE. docker-compose-plugin fornece `docker compose`
+# (V2, subcomando) em vez do antigo `docker-compose` (V1, binario Python).
+docker_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+
+# Mapeia a arquitetura do Ansible para a nomenclatura do apt.
+docker_apt_arch: "{{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}"
+
+# SDK Python do Docker, exigido pelos modulos community.docker.
+# O nome do pacote e o mesmo em Debian/Ubuntu e RedHat.
+docker_sdk_package: python3-docker
+
+# Versao minima aceita. community.docker 4.x+ exige um SDK recente; se o
+# pacote da distro for mais velho que isso, o playbook instala via pip.
+docker_sdk_min_version: "7.0.0"
+
+# Usuario que sera adicionado ao grupo docker.
+# ansible_user_id e quem executa; em conexao local, e voce.
+docker_user: "{{ ansible_env.SUDO_USER | default(ansible_user_id, true) }}"

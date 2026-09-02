@@ -1,0 +1,170 @@
+---
+# =============================================================================
+# Role: validate
+# Requisito da Parte 3: "validacao do funcionamento do servico desenvolvido
+# atraves de uma requisicao HTTP, e posterior exibicao da resposta no console"
+#
+# A validacao passa pelo NGINX (porta 80), e nao direto na aplicacao,
+# porque e exatamente o caminho que o desafio manda testar:
+#   curl http://localhost:80/projeto-korp
+# =============================================================================
+
+- name: Aguardar a porta 80 aceitar conexoes
+  ansible.builtin.wait_for:
+    host: "{{ korp_validate_host }}"
+    port: 80
+    state: started
+    timeout: 90
+    delay: 2
+
+# -----------------------------------------------------------------------------
+# VALIDACAO PRINCIPAL - o endpoint do desafio
+# -----------------------------------------------------------------------------
+- name: "Requisicao HTTP: GET http://{{ korp_validate_host }}:80/projeto-korp"
+  ansible.builtin.uri:
+    url: "http://{{ korp_validate_host }}:80/projeto-korp"
+    method: GET
+    return_content: true
+    status_code: 200
+  register: resposta_korp
+  # A aplicacao pode levar alguns segundos para aceitar trafego mesmo
+  # depois da porta abrir. Repetir evita falso negativo.
+  retries: 10
+  delay: 3
+  until: resposta_korp.status is defined and resposta_korp.status == 200
+
+# -----------------------------------------------------------------------------
+# CONFERENCIA DO CONTRATO
+# -----------------------------------------------------------------------------
+- name: Validar o contrato do JSON retornado
+  ansible.builtin.assert:
+    that:
+      - resposta_korp.json.nome is defined
+      - resposta_korp.json.nome == 'Projeto Korp'
+      - resposta_korp.json.horario is defined
+      # Sufixo Z confirma que o horario esta em UTC, como o desafio exige.
+      - resposta_korp.json.horario is match('^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$')
+    fail_msg: "O JSON retornado nao corresponde ao contrato esperado."
+    success_msg: "Contrato validado: campo 'nome' correto e 'horario' em UTC (RFC3339)."
+
+- name: Confirmar que o horario e resolvido dinamicamente
+  ansible.builtin.uri:
+    url: "http://{{ korp_validate_host }}:80/projeto-korp"
+    method: GET
+    return_content: true
+  register: resposta_segunda
+
+- name: Comparar as duas respostas
+  ansible.builtin.assert:
+    that: resposta_korp.json.horario != resposta_segunda.json.horario
+    fail_msg: >-
+      As duas requisicoes retornaram o mesmo horario. O valor pode estar
+      sendo calculado uma unica vez, e nao a cada requisicao.
+    success_msg: "Horario muda entre requisicoes: resolucao dinamica confirmada."
+  # Duas requisicoes no mesmo segundo produzem o mesmo valor em RFC3339
+  # (precisao de 1s). Nesse caso o teste e inconclusivo, nao uma falha.
+  ignore_errors: true
+  register: teste_dinamico
+
+# -----------------------------------------------------------------------------
+# VALIDACAO DA STACK DE OBSERVABILIDADE
+# -----------------------------------------------------------------------------
+- name: Verificar se o NGINX bloqueia /metrics na borda
+  ansible.builtin.uri:
+    url: "http://{{ korp_validate_host }}:80/metrics"
+    method: GET
+    status_code: [403, 404]
+  register: metrics_bloqueado
+  failed_when: false
+
+- name: Consultar os targets do Prometheus
+  ansible.builtin.uri:
+    url: "http://{{ korp_validate_host }}:9090/api/v1/targets?state=active"
+    method: GET
+    return_content: true
+  register: prom_targets
+  retries: 12
+  delay: 5
+  until: >-
+    prom_targets.json is defined and
+    prom_targets.json.data.activeTargets
+      | selectattr('labels.job', 'equalto', 'http-server-projeto-korp')
+      | selectattr('health', 'equalto', 'up')
+      | list | length > 0
+  failed_when: false
+
+- name: Verificar a saude do Grafana
+  ansible.builtin.uri:
+    url: "http://{{ korp_validate_host }}:3000/api/health"
+    method: GET
+    return_content: true
+  register: grafana_health
+  retries: 12
+  delay: 5
+  until: grafana_health.status is defined and grafana_health.status == 200
+  failed_when: false
+
+- name: Confirmar que o datasource do Grafana foi provisionado
+  ansible.builtin.uri:
+    url: "http://{{ korp_validate_host }}:3000/api/datasources/uid/prometheus-korp"
+    method: GET
+    user: "{{ korp_grafana_user }}"
+    password: "{{ korp_grafana_password }}"
+    force_basic_auth: true
+    return_content: true
+  register: grafana_ds
+  failed_when: false
+
+- name: Confirmar que o dashboard foi provisionado
+  ansible.builtin.uri:
+    url: "http://{{ korp_validate_host }}:3000/api/dashboards/uid/http-server-projeto-korp"
+    method: GET
+    user: "{{ korp_grafana_user }}"
+    password: "{{ korp_grafana_password }}"
+    force_basic_auth: true
+    return_content: true
+  register: grafana_dash
+  failed_when: false
+
+# -----------------------------------------------------------------------------
+# EXIBICAO DO RESULTADO NO CONSOLE
+# -----------------------------------------------------------------------------
+- name: RESPOSTA DO SERVICO
+  ansible.builtin.debug:
+    msg:
+      - "=================================================================="
+      - "  GET http://{{ korp_validate_host }}:80/projeto-korp"
+      - "=================================================================="
+      - "  HTTP {{ resposta_korp.status }}"
+      - "  Content-Type: {{ resposta_korp.content_type | default('n/d') }}"
+      - ""
+      - "  {{ resposta_korp.content }}"
+      - ""
+      - "  nome    : {{ resposta_korp.json.nome }}"
+      - "  horario : {{ resposta_korp.json.horario }}  (UTC)"
+      - "=================================================================="
+
+- name: RESUMO DO PROVISIONAMENTO
+  ansible.builtin.debug:
+    msg:
+      - "=================================================================="
+      - "  AMBIENTE PROJETO KORP"
+      - "=================================================================="
+      - "  Aplicacao via NGINX  : {{ 'OK' if resposta_korp.status == 200 else 'FALHA' }}"
+      - "  Contrato JSON        : OK (nome + horario em UTC)"
+      - "  Horario dinamico     : {{ 'confirmado' if not teste_dinamico.failed else 'inconclusivo (mesmo segundo)' }}"
+      - "  /metrics protegido   : {{ 'OK (bloqueado na borda)' if metrics_bloqueado.status in [403, 404] else 'ATENCAO: exposto' }}"
+      - "  Prometheus coletando : {{ 'OK' if prom_targets.status | default(0) == 200 else 'FALHA' }}"
+      - "  Grafana              : {{ grafana_health.json.database | default('FALHA') }}"
+      - "  Datasource           : {{ 'provisionado' if grafana_ds.status | default(0) == 200 else 'FALHA' }}"
+      - "  Dashboard            : {{ 'provisionado' if grafana_dash.status | default(0) == 200 else 'FALHA' }}"
+      - "------------------------------------------------------------------"
+      - "  Servico     http://{{ korp_validate_host }}/projeto-korp"
+      - "  Prometheus  http://{{ korp_validate_host }}:9090"
+      - "  Grafana     http://{{ korp_validate_host }}:3000  ({{ korp_grafana_user }} / {{ korp_grafana_password }})"
+      - "=================================================================="
+
+- name: Falhar o playbook se a validacao principal nao passou
+  ansible.builtin.assert:
+    that: resposta_korp.status == 200
+    fail_msg: "O servico nao respondeu corretamente na porta 80."

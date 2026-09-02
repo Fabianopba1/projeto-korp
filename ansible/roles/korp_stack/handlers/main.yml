@@ -1,0 +1,17 @@
+---
+# nginx -s reload troca a configuracao sem derrubar conexoes ativas,
+# diferente de reiniciar o container.
+- name: Recarregar nginx
+  community.docker.docker_container_exec:
+    container: nginx-projeto-korp
+    command: nginx -s reload
+  failed_when: false   # o container pode ainda nao existir no 1o run
+
+# O Prometheus recarrega a config via POST quando iniciado com
+# --web.enable-lifecycle (ja configurado no compose).
+- name: Recarregar prometheus
+  ansible.builtin.uri:
+    url: "http://localhost:9090/-/reload"
+    method: POST
+    status_code: [200, 204]
+  failed_when: false

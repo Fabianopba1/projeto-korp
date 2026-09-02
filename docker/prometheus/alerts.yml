@@ -1,0 +1,95 @@
+# =============================================================================
+# Regras de alerta - Projeto Korp
+#
+# Nao sao exigidas pelo desafio, mas demonstram que as metricas coletadas
+# servem para agir, e nao apenas para desenhar graficos bonitos.
+#
+# Para os alertas realmente notificarem alguem seria preciso adicionar o
+# Alertmanager a stack. Aqui eles ficam visiveis em
+# http://localhost:9090/alerts.
+# =============================================================================
+
+groups:
+
+  - name: disponibilidade
+    rules:
+
+      # A metrica `up` e gerada pelo proprio Prometheus a cada scrape:
+      # 1 quando o target respondeu, 0 quando falhou. E o sinal canonico
+      # de disponibilidade exigido pelo desafio.
+      - alert: ServicoIndisponivel
+        expr: up{job="http-server-projeto-korp"} == 0
+        # "for" evita alarme falso por um unico scrape perdido: o estado
+        # precisa persistir 1 minuto antes de disparar.
+        for: 1m
+        labels:
+          severidade: critica
+        annotations:
+          resumo: "Servico http-server-projeto-korp fora do ar"
+          descricao: "O target {{ $labels.instance }} nao responde ao scrape ha mais de 1 minuto."
+
+      - alert: DisponibilidadeAbaixoDoSLO
+        # Media de `up` na ultima hora. Como up e 0 ou 1, a media equivale
+        # a fracao do tempo em que o servico esteve no ar.
+        expr: avg_over_time(up{job="http-server-projeto-korp"}[1h]) < 0.99
+        for: 5m
+        labels:
+          severidade: aviso
+        annotations:
+          resumo: "Disponibilidade abaixo de 99% na ultima hora"
+          descricao: "Disponibilidade medida: {{ $value | humanizePercentage }}."
+
+      - alert: ServicoReiniciouRecentemente
+        # korp_uptime_seconds volta a zero a cada restart. Detecta crash
+        # loop mesmo quando o restart e rapido demais para zerar `up`.
+        expr: korp_uptime_seconds < 120
+        for: 30s
+        labels:
+          severidade: aviso
+        annotations:
+          resumo: "Aplicacao reiniciou ha menos de 2 minutos"
+          descricao: "Uptime atual: {{ $value }}s. Verifique se ha crash loop."
+
+  - name: trafego_e_erros
+    rules:
+
+      - alert: TaxaDeErro5xxAlta
+        # Proporcao de respostas 5xx sobre o total, na janela de 5 minutos.
+        # rate() lida corretamente com o reset do contador em um restart.
+        expr: |
+          sum(rate(korp_http_requests_total{status=~"5.."}[5m]))
+            /
+          sum(rate(korp_http_requests_total[5m]))
+            > 0.05
+        for: 2m
+        labels:
+          severidade: critica
+        annotations:
+          resumo: "Mais de 5% das requisicoes retornando erro do servidor"
+          descricao: "Taxa de erro atual: {{ $value | humanizePercentage }}."
+
+      - alert: LatenciaP95Alta
+        # histogram_quantile reconstroi o percentil a partir dos buckets.
+        # O label "le" precisa estar presente no by(), por isso ele aparece.
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(korp_http_request_duration_seconds_bucket[5m]))
+          ) > 0.5
+        for: 5m
+        labels:
+          severidade: aviso
+        annotations:
+          resumo: "Latencia p95 acima de 500ms"
+          descricao: "p95 atual: {{ $value }}s."
+
+      - alert: SemTrafego
+        # Util para detectar que o proxy quebrou: o servico esta up, mas
+        # nenhuma requisicao chega ate ele.
+        expr: sum(rate(korp_http_requests_total[10m])) == 0
+        for: 10m
+        labels:
+          severidade: info
+        annotations:
+          resumo: "Nenhuma requisicao recebida nos ultimos 10 minutos"
+          descricao: "Pode indicar falha no NGINX ou ausencia real de trafego."

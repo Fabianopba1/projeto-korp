@@ -1,0 +1,14 @@
+# Reduz o contexto de build enviado ao daemon e evita vazar arquivos
+# locais para dentro da imagem.
+.git
+.gitignore
+Dockerfile
+.dockerignore
+*.md
+bin/
+dist/
+*.test
+*.out
+coverage.*
+.idea/
+.vscode/

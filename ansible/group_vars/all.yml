@@ -1,0 +1,20 @@
+---
+# =============================================================================
+# Variaveis compartilhadas por todas as roles.
+# Sobrescreva na linha de comando com -e, por exemplo:
+#   ansible-playbook site.yml -e korp_app_version=2.0.0
+# =============================================================================
+
+# Raiz do repositorio na maquina que EXECUTA o Ansible (control node).
+# playbook_dir aponta para .../ansible, entao subimos um nivel.
+korp_repo_dir: "{{ playbook_dir }}/.."
+
+# Onde a stack sera materializada no host ALVO.
+korp_project_dir: /opt/projeto-korp
+
+korp_network_name: korp-net
+korp_app_version: "1.0.0"
+korp_log_level: info
+
+korp_grafana_user: admin
+korp_grafana_password: admin
