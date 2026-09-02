@@ -95,16 +95,15 @@
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [
-            "lastNonNull"
+            "lastNotNull"
           ],
           "fields": "",
           "values": false
         },
-        "textMode": "auto",
+        "textMode": "value",
         "wideLayout": true,
         "percentChangeColorMode": "standard",
-        "showPercentChange": false,
-        "text": {}
+        "showPercentChange": false
       },
       "targets": [
         {
@@ -115,8 +114,8 @@
           "editorMode": "code",
           "expr": "up{job=\"http-server-projeto-korp\"}",
           "legendFormat": "__auto",
-          "range": false,
-          "instant": true,
+          "range": true,
+          "instant": false,
           "refId": "A"
         }
       ],
@@ -172,16 +171,15 @@
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [
-            "lastNonNull"
+            "lastNotNull"
           ],
           "fields": "",
           "values": false
         },
-        "textMode": "auto",
+        "textMode": "value",
         "wideLayout": true,
         "percentChangeColorMode": "standard",
-        "showPercentChange": false,
-        "text": {}
+        "showPercentChange": false
       },
       "targets": [
         {
@@ -192,8 +190,8 @@
           "editorMode": "code",
           "expr": "avg_over_time(up{job=\"http-server-projeto-korp\"}[6h]) * 100",
           "legendFormat": "__auto",
-          "range": false,
-          "instant": true,
+          "range": true,
+          "instant": false,
           "refId": "A"
         }
       ],
@@ -249,16 +247,15 @@
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [
-            "lastNonNull"
+            "lastNotNull"
           ],
           "fields": "",
           "values": false
         },
-        "textMode": "auto",
+        "textMode": "value",
         "wideLayout": true,
         "percentChangeColorMode": "standard",
-        "showPercentChange": false,
-        "text": {}
+        "showPercentChange": false
       },
       "targets": [
         {
@@ -269,8 +266,8 @@
           "editorMode": "code",
           "expr": "sum(rate(korp_http_requests_total{status=~\"2..|3..\"}[5m])) / clamp_min(sum(rate(korp_http_requests_total[5m])), 0.0001) * 100",
           "legendFormat": "__auto",
-          "range": false,
-          "instant": true,
+          "range": true,
+          "instant": false,
           "refId": "A"
         }
       ],
@@ -322,16 +319,15 @@
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [
-            "lastNonNull"
+            "lastNotNull"
           ],
           "fields": "",
           "values": false
         },
-        "textMode": "auto",
+        "textMode": "value",
         "wideLayout": true,
         "percentChangeColorMode": "standard",
-        "showPercentChange": false,
-        "text": {}
+        "showPercentChange": false
       },
       "targets": [
         {
@@ -342,8 +338,8 @@
           "editorMode": "code",
           "expr": "korp_uptime_seconds",
           "legendFormat": "__auto",
-          "range": false,
-          "instant": true,
+          "range": true,
+          "instant": false,
           "refId": "A"
         }
       ],
@@ -390,16 +386,15 @@
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [
-            "lastNonNull"
+            "lastNotNull"
           ],
-          "fields": "/^version$/",
+          "fields": "",
           "values": false
         },
-        "textMode": "value",
+        "textMode": "name",
         "wideLayout": true,
         "percentChangeColorMode": "standard",
-        "showPercentChange": false,
-        "text": {}
+        "showPercentChange": false
       },
       "targets": [
         {
@@ -409,9 +404,9 @@
           },
           "editorMode": "code",
           "expr": "korp_build_info",
-          "legendFormat": "__auto",
-          "range": false,
-          "instant": true,
+          "legendFormat": "{{version}}",
+          "range": true,
+          "instant": false,
           "refId": "A"
         }
       ],
@@ -571,16 +566,15 @@
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [
-            "lastNonNull"
+            "lastNotNull"
           ],
           "fields": "",
           "values": false
         },
-        "textMode": "auto",
+        "textMode": "value",
         "wideLayout": true,
         "percentChangeColorMode": "standard",
-        "showPercentChange": false,
-        "text": {}
+        "showPercentChange": false
       },
       "targets": [
         {
@@ -591,8 +585,8 @@
           "editorMode": "code",
           "expr": "sum(rate(korp_http_requests_total[5m]))",
           "legendFormat": "__auto",
-          "range": false,
-          "instant": true,
+          "range": true,
+          "instant": false,
           "refId": "A"
         }
       ],
@@ -640,16 +634,15 @@
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [
-            "lastNonNull"
+            "lastNotNull"
           ],
           "fields": "",
           "values": false
         },
-        "textMode": "auto",
+        "textMode": "value",
         "wideLayout": true,
         "percentChangeColorMode": "standard",
-        "showPercentChange": false,
-        "text": {}
+        "showPercentChange": false
       },
       "targets": [
         {
@@ -660,8 +653,8 @@
           "editorMode": "code",
           "expr": "sum(korp_http_requests_total)",
           "legendFormat": "__auto",
-          "range": false,
-          "instant": true,
+          "range": true,
+          "instant": false,
           "refId": "A"
         }
       ],
@@ -717,16 +710,15 @@
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [
-            "lastNonNull"
+            "lastNotNull"
           ],
           "fields": "",
           "values": false
         },
-        "textMode": "auto",
+        "textMode": "value",
         "wideLayout": true,
         "percentChangeColorMode": "standard",
-        "showPercentChange": false,
-        "text": {}
+        "showPercentChange": false
       },
       "targets": [
         {
@@ -735,10 +727,10 @@
             "uid": "prometheus-korp"
           },
           "editorMode": "code",
-          "expr": "sum(rate(korp_http_requests_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(korp_http_requests_total[5m])), 0.0001) * 100",
+          "expr": "(sum(rate(korp_http_requests_total{status=~\"5..\"}[5m])) or vector(0)) / clamp_min(sum(rate(korp_http_requests_total[5m])), 0.0001) * 100",
           "legendFormat": "__auto",
-          "range": false,
-          "instant": true,
+          "range": true,
+          "instant": false,
           "refId": "A"
         }
       ],
