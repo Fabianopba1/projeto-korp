@@ -133,11 +133,36 @@ func (r *statusRecorder) WriteHeader(code int) {
 	r.ResponseWriter.WriteHeader(code)
 }
 
+// knownMethods e a lista fechada de valores aceitos no label "method".
+var knownMethods = map[string]struct{}{
+	http.MethodGet:     {},
+	http.MethodHead:    {},
+	http.MethodPost:    {},
+	http.MethodPut:     {},
+	http.MethodPatch:   {},
+	http.MethodDelete:  {},
+	http.MethodOptions: {},
+}
+
+// normalizeMethod devolve o metodo se ele for conhecido, ou "other".
+//
+// O servidor HTTP do Go aceita qualquer token como metodo (FOOBAR, BAZ...),
+// e cada valor novo criaria uma serie no counter e uma por bucket no
+// histograma. Sem esta normalizacao um cliente conseguiria o mesmo efeito
+// de cardinalidade infinita que o label "path" evita.
+func normalizeMethod(m string) string {
+	if _, ok := knownMethods[m]; ok {
+		return m
+	}
+	return "other"
+}
+
 // Middleware instrumenta qualquer handler HTTP.
 //
 // Importante: o label "path" recebe a rota registrada (ex: /projeto-korp)
 // e nao r.URL.Path. Usar a URL crua permitiria a um cliente gerar
-// cardinalidade infinita (/a, /b, /c...) e derrubar o Prometheus.
+// cardinalidade infinita (/a, /b, /c...) e derrubar o Prometheus. O label
+// "method" passa pelo mesmo tratamento em normalizeMethod.
 func Middleware(routePattern string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -147,8 +172,9 @@ func Middleware(routePattern string, next http.Handler) http.Handler {
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
 
+		method := normalizeMethod(r.Method)
 		elapsed := time.Since(start).Seconds()
-		RequestsTotal.WithLabelValues(r.Method, routePattern, strconv.Itoa(rec.status)).Inc()
-		RequestDuration.WithLabelValues(r.Method, routePattern).Observe(elapsed)
+		RequestsTotal.WithLabelValues(method, routePattern, strconv.Itoa(rec.status)).Inc()
+		RequestDuration.WithLabelValues(method, routePattern).Observe(elapsed)
 	})
 }

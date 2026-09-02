@@ -125,6 +125,13 @@
       }
   notify: Reiniciar docker
 
+# Handlers so rodam no fim do play. Sem o flush, o restart do daemon
+# aconteceria DEPOIS de a role korp_stack subir a stack e de a validacao
+# passar: os quatro containers cairiam logo apos a mensagem de sucesso.
+# Forcamos o handler aqui, antes de qualquer container existir.
+- name: Aplicar a configuracao do daemon antes de subir containers
+  ansible.builtin.meta: flush_handlers
+
 # Necessario para os modulos community.docker.docker_network e docker_image,
 # que conversam com a API do Docker via SDK Python (nao pela CLI).
 - name: Instalar o SDK Python do Docker (via gerenciador de pacotes)
