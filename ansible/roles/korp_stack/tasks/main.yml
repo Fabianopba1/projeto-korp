@@ -7,6 +7,22 @@
 #   - criacao e execucao dos containers com docker compose
 #   - configuracao do NGINX com o proxy reverso
 #   - configuracao dos componentes de monitoramento
+#
+# A arvore criada no host alvo espelha a do repositorio:
+#
+#   /opt/projeto-korp/
+#   |-- app/                     <- codigo-fonte + Dockerfile
+#   `-- docker/
+#       |-- docker-compose.yml
+#       |-- .env
+#       |-- nginx/conf.d/
+#       |-- prometheus/
+#       `-- grafana/provisioning/
+#
+# Isso importa: todos os caminhos relativos do compose (../app para o build,
+# ./nginx, ./prometheus, ./grafana para os volumes) resolvem exatamente
+# como resolvem no repositorio. Achatar a estrutura quebraria o contexto
+# de build.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -20,10 +36,11 @@
   loop:
     - "{{ korp_project_dir }}"
     - "{{ korp_project_dir }}/app"
-    - "{{ korp_project_dir }}/nginx/conf.d"
-    - "{{ korp_project_dir }}/prometheus"
-    - "{{ korp_project_dir }}/grafana/provisioning/datasources"
-    - "{{ korp_project_dir }}/grafana/provisioning/dashboards"
+    - "{{ korp_project_dir }}/docker"
+    - "{{ korp_project_dir }}/docker/nginx/conf.d"
+    - "{{ korp_project_dir }}/docker/prometheus"
+    - "{{ korp_project_dir }}/docker/grafana/provisioning/datasources"
+    - "{{ korp_project_dir }}/docker/grafana/provisioning/dashboards"
 
 # -----------------------------------------------------------------------------
 # 2. ENVIO DO CODIGO-FONTE E DAS CONFIGURACOES
@@ -41,14 +58,14 @@
 - name: Copiar a configuracao de proxy reverso do NGINX
   ansible.builtin.copy:
     src: "{{ korp_repo_dir }}/docker/nginx/conf.d/http-server-projeto-korp.conf"
-    dest: "{{ korp_project_dir }}/nginx/conf.d/http-server-projeto-korp.conf"
+    dest: "{{ korp_project_dir }}/docker/nginx/conf.d/http-server-projeto-korp.conf"
     mode: "0644"
   notify: Recarregar nginx
 
 - name: Copiar as configuracoes do Prometheus
   ansible.builtin.copy:
     src: "{{ korp_repo_dir }}/docker/prometheus/{{ item }}"
-    dest: "{{ korp_project_dir }}/prometheus/{{ item }}"
+    dest: "{{ korp_project_dir }}/docker/prometheus/{{ item }}"
     mode: "0644"
   loop:
     - prometheus.yml
@@ -58,20 +75,22 @@
 - name: Copiar o provisionamento do Grafana (datasource e dashboard)
   ansible.builtin.copy:
     src: "{{ korp_repo_dir }}/docker/grafana/provisioning/"
-    dest: "{{ korp_project_dir }}/grafana/provisioning/"
+    dest: "{{ korp_project_dir }}/docker/grafana/provisioning/"
     mode: "0644"
     directory_mode: "0755"
 
 - name: Copiar o arquivo docker-compose.yml
   ansible.builtin.copy:
     src: "{{ korp_repo_dir }}/docker/docker-compose.yml"
-    dest: "{{ korp_project_dir }}/docker-compose.yml"
+    dest: "{{ korp_project_dir }}/docker/docker-compose.yml"
     mode: "0644"
 
+# O `docker compose` le o .env do diretorio do projeto, entao ele precisa
+# ficar ao lado do docker-compose.yml.
 - name: Gerar o arquivo .env com as variaveis da stack
   ansible.builtin.template:
     src: env.j2
-    dest: "{{ korp_project_dir }}/.env"
+    dest: "{{ korp_project_dir }}/docker/.env"
     mode: "0600"   # contem a senha do Grafana
 
 # -----------------------------------------------------------------------------
@@ -101,21 +120,31 @@
 # -----------------------------------------------------------------------------
 # 4. BUILD DA IMAGEM
 # -----------------------------------------------------------------------------
+# Usamos docker_image_build, e nao docker_image, porque o Dockerfile usa
+# RUN --mount=type=cache, que e sintaxe do BuildKit.
+#
+# O modulo docker_image conversa com a API classica do Docker Engine, cujo
+# builder legado nao entende --mount e falha com "the --mount option
+# requires BuildKit". Ja o docker_image_build chama `docker buildx build`,
+# que usa BuildKit.
+#
+# Na linha de comando isso passa despercebido: desde o Docker 23, o
+# `docker build` ja usa buildx por padrao. A diferenca so aparece pela API.
 - name: Construir a imagem do http-server-projeto-korp
-  community.docker.docker_image:
+  community.docker.docker_image_build:
     name: http-server-projeto-korp
     tag: "{{ korp_app_version }}"
-    build:
-      path: "{{ korp_project_dir }}/app"
-      dockerfile: Dockerfile
-      pull: true          # busca a base mais recente do golang:1.22-alpine
-      nocache: "{{ korp_build_nocache }}"
-      args:
-        VERSION: "{{ korp_app_version }}"
-        COMMIT: "{{ korp_app_commit }}"
-    source: build
-    state: present
-    force_source: "{{ fonte_app.changed }}"
+    path: "{{ korp_project_dir }}/app"
+    dockerfile: Dockerfile
+    pull: true            # busca a base mais recente do golang:1.22-alpine
+    nocache: "{{ korp_build_nocache }}"
+    args:
+      VERSION: "{{ korp_app_version }}"
+      COMMIT: "{{ korp_app_commit }}"
+    # rebuild=never pula o build se a imagem ja existe, o que garante
+    # idempotencia. Quando o codigo-fonte muda, forcamos always para a
+    # nova versao entrar.
+    rebuild: "{{ 'always' if fonte_app.changed else 'never' }}"
   register: build_imagem
 
 - name: Exibir o resultado do build
@@ -129,9 +158,13 @@
 # -----------------------------------------------------------------------------
 # docker_compose_v2 usa a CLI `docker compose` por baixo, entao respeita
 # depends_on/condition: service_healthy do compose file.
+#
+# wait: true faz o modulo aguardar os healthchecks passarem antes de
+# devolver o controle, o que evita a corrida classica de o playbook
+# seguir com os containers ainda subindo.
 - name: Subir a stack com docker compose
   community.docker.docker_compose_v2:
-    project_src: "{{ korp_project_dir }}"
+    project_src: "{{ korp_project_dir }}/docker"
     files:
       - docker-compose.yml
     state: present
@@ -141,23 +174,27 @@
     wait_timeout: 180
   register: compose_up
 
-- name: Listar os containers em execucao
-  ansible.builtin.command: docker compose ps --format json
-  args:
-    chdir: "{{ korp_project_dir }}"
-  register: containers_ps
+- name: Aguardar os quatro containers da stack ficarem em execucao
+  ansible.builtin.command:
+    cmd: docker compose ps --status running --quiet
+    chdir: "{{ korp_project_dir }}/docker"
+  register: containers_rodando
   changed_when: false
-
-- name: Aguardar todos os containers ficarem saudaveis
-  ansible.builtin.shell: >-
-    set -o pipefail;
-    docker ps --filter "name=projeto-korp" --format '{{ "{{" }}.Names{{ "}}" }}'
-    | wc -l
-  args:
-    chdir: "{{ korp_project_dir }}"
-    executable: /bin/bash
-  register: containers_ativos
-  retries: 20
+  retries: 12
   delay: 5
-  until: containers_ativos.stdout | int >= 1
+  until: containers_rodando.stdout_lines | length == 4
+
+- name: Coletar o estado detalhado dos containers
+  ansible.builtin.command:
+    cmd: >-
+      docker inspect
+      --format={% raw %}'{{.Name}} | {{.State.Status}} | {{if .State.Health}}{{.State.Health.Status}}{{else}}sem healthcheck{{end}}'{% endraw %}
+      http-server-projeto-korp nginx-projeto-korp
+      prometheus-projeto-korp grafana-projeto-korp
+  register: estado_containers
   changed_when: false
+  failed_when: false
+
+- name: Exibir o estado dos containers
+  ansible.builtin.debug:
+    msg: "{{ estado_containers.stdout_lines }}"

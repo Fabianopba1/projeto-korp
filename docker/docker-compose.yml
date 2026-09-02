@@ -11,6 +11,16 @@
 #
 # A chave "version:" foi removida de proposito: ela e obsoleta no
 # Compose V2 e gera warning nas versoes recentes.
+#
+# NOTA SOBRE OS HEALTHCHECKS
+# Todas as sondas usam 127.0.0.1 explicitamente, nunca "localhost".
+# Dentro do container, /etc/hosts mapeia localhost para 127.0.0.1 E para
+# ::1. Se o servidor faz bind apenas em IPv4, a sonda pode tentar ::1 e
+# receber "Connection refused" com o servico perfeitamente saudavel.
+# Foi exatamente o que aconteceu com o NGINX ("listen 80" = so IPv4),
+# enquanto Prometheus e Grafana passavam por serem escritos em Go, que
+# faz bind dual-stack por padrao. Fixar IPv4 elimina a dependencia do
+# comportamento de bind de cada servidor.
 # =============================================================================
 
 name: projeto-korp
@@ -62,6 +72,7 @@ services:
 
     healthcheck:
       # Usa o binario Go embutido na imagem (nao ha shell no distroless).
+      # Ele ja aponta para 127.0.0.1 internamente.
       test: ["CMD", "/app/healthcheck"]
       interval: 10s
       timeout: 3s
@@ -114,7 +125,10 @@ services:
         condition: service_healthy
 
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost/nginx-health"]
+      # 127.0.0.1, nunca localhost: o NGINX usa "listen 80", que faz bind
+      # apenas em IPv4. Com "localhost" a sonda pode tentar ::1 e receber
+      # Connection refused mesmo com o servico funcionando normalmente.
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/nginx-health"]
       interval: 10s
       timeout: 3s
       retries: 3
@@ -160,7 +174,10 @@ services:
       - --web.enable-lifecycle
 
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      # Funcionaria com "localhost" porque o Prometheus e Go e faz bind
+      # dual-stack, mas fixamos IPv4 para a sonda nao depender de um
+      # detalhe de implementacao do servidor.
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:9090/-/healthy"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -207,7 +224,9 @@ services:
         condition: service_healthy
 
     healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://localhost:3000/api/health || exit 1"]
+      # Forma CMD (array) em vez de CMD-SHELL: o "|| exit 1" era redundante,
+      # ja que o proprio wget devolve codigo diferente de zero em falha.
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/api/health"]
       interval: 15s
       timeout: 5s
       retries: 3
