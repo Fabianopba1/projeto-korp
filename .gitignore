@@ -3,8 +3,10 @@ bin/
 dist/
 *.exe
 *.test
-server
-healthcheck
+# Ancorados com / para casar apenas o binário compilado na raiz de app/,
+# e não o diretório app/cmd/healthcheck/ que contém o código-fonte.
+/app/server
+/app/healthcheck
 
 # Cobertura e profiling
 *.out
