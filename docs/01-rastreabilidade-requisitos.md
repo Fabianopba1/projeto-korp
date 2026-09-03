@@ -61,7 +61,7 @@ deixá-las escondidas no código.
 |---|---|---|---|
 | 3.1 | Instalação do Docker em Linux | Role `docker` | ✅ |
 | 3.2 | Criação da rede Docker | Módulo `community.docker.docker_network` | ➕ |
-| 3.3 | Build da imagem do serviço | Módulo `community.docker.docker_image` | ➕ |
+| 3.3 | Build da imagem do serviço | Módulo `community.docker.docker_image_build` (buildx), exigido pelo `RUN --mount=type=cache` do Dockerfile | ➕ |
 | 3.4 | Criação e execução dos containers com compose | Módulo `community.docker.docker_compose_v2` | ➕ |
 | 3.5 | Configuração do NGINX com proxy reverso | Template Jinja2 materializado no host alvo | ➕ |
 | 3.6 | Configuração dos componentes de monitoramento | Configs do Prometheus e provisionamento do Grafana por template | ✅ |
