@@ -10,4 +10,5 @@ korp_display_host: "{{ ansible_host | default(inventory_hostname) }}"
 korp_intervalo_teste_dinamico: 2
 
 korp_grafana_user: admin
-korp_grafana_password: admin
+# Sem default de propósito: se group_vars nao definir, o playbook falha
+# com "undefined variable" em vez de subir silenciosamente com admin.

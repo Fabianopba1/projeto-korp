@@ -107,8 +107,13 @@ services:
     networks:
       - korp-net
 
+    # Publicado apenas no loopback do host. O unico consumidor e o grafana,
+    # que alcanca pelo DNS interno da korp-net (prometheus:9090); publicar em
+    # 0.0.0.0 nao atende nenhum consumidor legitimo e expoe na LAN um servico
+    # sem autenticacao. Para inspecionar a UI de targets/alertas de fora:
+    #   ssh -L 9090:127.0.0.1:9090 korp@<ip-da-vm>
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
 
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro

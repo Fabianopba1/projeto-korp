@@ -102,6 +102,7 @@
     return_content: true
   register: grafana_ds
   failed_when: false
+  no_log: true   # a URL com credencial apareceria no log em caso de erro
 
 - name: Confirmar que o dashboard foi provisionado
   ansible.builtin.uri:
@@ -113,6 +114,7 @@
     return_content: true
   register: grafana_dash
   failed_when: false
+  no_log: true
 
 - name: RESPOSTA DO SERVICO
   ansible.builtin.debug:
@@ -145,8 +147,13 @@
       - "  Dashboard            : {{ 'provisionado' if grafana_dash.status | default(0) == 200 else 'FALHA' }}"
       - "------------------------------------------------------------------"
       - "  Servico     http://{{ korp_display_host }}/projeto-korp"
-      - "  Prometheus  http://{{ korp_display_host }}:9090"
-      - "  Grafana     http://{{ korp_display_host }}:3000  ({{ korp_grafana_user }} / {{ korp_grafana_password }})"
+      # O prometheus escuta apenas no loopback da VM, por isso o link nao e
+      # clicavel de fora: o acesso externo passa por tunel SSH.
+      - "  Prometheus  http://127.0.0.1:9090  (apenas na VM)"
+      - "              tunel: ssh -L 9090:127.0.0.1:9090 {{ ansible_user | default('korp') }}@{{ korp_display_host }}"
+      # A senha nao e impressa: ela vem do cofre e o console fica no
+      # scrollback do terminal e em qualquer gravacao da demo.
+      - "  Grafana     http://{{ korp_display_host }}:3000  (usuario: {{ korp_grafana_user }})"
       - "=================================================================="
 
 - name: Falhar o playbook se a validacao principal nao passou
