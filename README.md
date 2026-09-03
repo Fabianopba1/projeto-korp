@@ -47,6 +47,7 @@ bastando ajustar o inventário.
 app/                    aplicação Go, testes, Dockerfile multi-stage
 docker/                 docker-compose.yml, nginx, prometheus, grafana
 ansible/                site.yml, inventário e roles docker / korp_stack / validate
+ansible/group_vars/all/ vars.yml e vault.yml (senha do Grafana, criptografada)
 preflight.sh            checa pré-condições antes do deploy
 verify.sh               aceite contra os requisitos do desafio
 Makefile                atalhos (make help)
@@ -76,6 +77,22 @@ no console.
 O alvo fica em `ansible/inventory/hosts.ini`. Para provisionar a própria
 máquina, troque a linha do host por `localhost ansible_connection=local`.
 
+### Executando a partir de um clone
+
+A senha do Grafana está criptografada em `ansible/group_vars/all/vault.yml`,
+e a senha que abre esse arquivo (`ansible/vault-pass.txt`) não é versionada.
+Quem clonar o repositório precisa fornecer a sua própria:
+
+```bash
+cd ansible
+echo "uma-senha-qualquer" > vault-pass.txt && chmod 600 vault-pass.txt
+rm group_vars/all/vault.yml
+printf -- '---\nvault_korp_grafana_password: "escolha-uma-senha"\n' > /tmp/v.yml
+ansible-vault encrypt /tmp/v.yml --output group_vars/all/vault.yml \
+  --vault-password-file vault-pass.txt
+shred -u /tmp/v.yml
+```
+
 Sem Ansible, só com Docker:
 
 ```bash
@@ -92,7 +109,9 @@ que a build usa (Docker Hub, gcr.io, proxy.golang.org).
 `./verify.sh` roda depois: percorre os itens do enunciado um a um, incluindo
 os fáceis de esquecer (aplicação sem portas publicadas, imagem oficial do
 NGINX, volume em `/etc/nginx/conf.d/`, rede com driver `bridge`, horário
-mudando entre duas requisições).
+mudando entre duas requisições). As checagens do Grafana são autenticadas de
+verdade, com a credencial lida do `.env` do host alvo — foi isso que expôs a
+divergência descrita em "Problemas encontrados".
 
 | Demonstração | Como | O que prova |
 |---|---|---|
@@ -168,6 +187,19 @@ para os caminhos relativos do compose resolverem igual. A validação confere
 o contrato, exige o sufixo `Z` no horário e faz duas requisições com 2 s de
 intervalo para provar que o valor é dinâmico.
 
+**Segredos.** A senha do Grafana fica em `group_vars/all/vault.yml`,
+criptografada com `ansible-vault`. O arquivo vai para o repositório; a senha
+que o abre não — está no `.gitignore` e é referenciada pelo
+`vault_password_file` no `ansible.cfg`, o que mantém o deploy como um único
+comando, sem prompt. O `vars.yml` referencia `{{ vault_korp_grafana_password }}`
+em vez de conter o valor: a indireção com prefixo `vault_` permite achar
+onde cada segredo é usado com um `grep`, sem descriptografar nada. Os
+defaults das roles não definem a senha, então o playbook falha com
+"undefined variable" se `group_vars` não fornecer — melhor que subir em
+silêncio com credencial fraca. As tasks que autenticam no Grafana usam
+`no_log`, e o resumo final exibe só o usuário: sem isso a senha apareceria
+no console durante a demonstração.
+
 ## Problemas encontrados
 
 **`--mount` requer BuildKit.** O módulo `docker_image` usa a API clássica do
@@ -199,11 +231,32 @@ após escrever o `daemon.json` só rodava no fim do play, derrubando os
 containers logo depois da mensagem de sucesso. Um `flush_handlers` após a
 task resolve.
 
+**Estado em volume não se reconcilia com o código.** Depois de mover a senha
+do Grafana para o cofre e reimplantar, a autenticação continuou falhando —
+nem com a senha nova, nem com a antiga. `GF_SECURITY_ADMIN_PASSWORD` só é
+aplicada quando o Grafana **cria** o banco; o volume `grafana-data` já
+existia com o usuário admin gravado, e a senha havia sido alterada pela
+interface num acesso anterior. O contraste é o argumento central a favor de
+provisionamento como código: o datasource e o dashboard, declarados em
+arquivo, voltaram idênticos a cada deploy; a senha, que vive só no volume,
+divergiu em silêncio. Corrigido recriando o volume. Só apareceu porque o
+`verify.sh` autentica de verdade — uma checagem que apenas perguntasse "o
+Grafana responde?" teria dado verde o tempo todo.
+
 ## Limitações
 
 - `sudo` sem senha para o usuário de automação, num host de laboratório
   isolado. Em produção, escopo restrito no `sudoers` ou credencial em cofre.
-- Credenciais do Grafana em texto plano (`admin`/`admin`).
+- A senha do Grafana não é reconciliada pelo playbook: ela vale na criação
+  do banco, e alterações feitas pela interface sobrescrevem o valor
+  declarado sem que uma nova execução as reverta. Reconciliar exige recriar
+  o volume `grafana-data` ou usar `grafana-cli admin reset-admin-password`
+  numa task condicional.
+- O `.env` no host tem modo `0600` e dono root, por conter a senha. Comandos
+  `docker compose` executados manualmente no host precisam de `sudo` para
+  lê-lo, mesmo com o usuário no grupo `docker` — permissão do daemon e
+  permissão de arquivo são coisas diferentes. O playbook não é afetado
+  porque roda com `become`.
 - Sem TLS, sem Alertmanager, sem alta disponibilidade. As regras de alerta
   existem e aparecem em `:9090/alerts`, mas não notificam ninguém.
 - Prometheus com armazenamento local e retenção de 15 dias.
