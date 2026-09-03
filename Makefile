@@ -1,11 +1,16 @@
 .DEFAULT_GOAL := help
-SHELL := /bin/bash
+SHELL := /bin/bash -o pipefail
 
 APP_DIR     := app
 DOCKER_DIR  := docker
 ANSIBLE_DIR := ansible
 NETWORK     := korp-net
 VERSION     ?= 1.0.0
+
+# Host alvo dos testes HTTP.
+# Default 'localhost' atende o requisito literal do desafio quando rodado na VM.
+# Do notebook: make smoke HOST=192.168.0.161
+HOST        ?= localhost
 
 .PHONY: help
 help: ## Lista os alvos disponiveis
@@ -66,18 +71,26 @@ logs: ## Acompanha os logs da stack
 # --- Validacao ---------------------------------------------------------------
 .PHONY: smoke
 smoke: ## Teste exigido pelo desafio
-	@echo "--> curl http://localhost:80/projeto-korp"
-	@curl -sS http://localhost:80/projeto-korp | tee /dev/stderr | \
-	  python3 -c "import json,sys; d=json.load(sys.stdin); \
+	@echo "--> curl http://$(HOST):80/projeto-korp"
+	@resp=$$(curl -fsS http://$(HOST):80/projeto-korp) \
+	  || { echo "FALHA: nenhum servico respondeu em http://$(HOST):80"; exit 1; }; \
+	echo "$$resp"; \
+	echo "$$resp" | python3 -c "import json,sys; d=json.load(sys.stdin); \
 	  assert d['nome']=='Projeto Korp'; assert d['horario'].endswith('Z'); \
-	  print('\nOK: contrato valido, horario em UTC')"
+	  print('OK: contrato valido, horario em UTC')"
 
 .PHONY: load
 load: ## Gera trafego para popular os graficos do Grafana
-	@echo "Gerando 300 requisicoes..."
-	@for i in $$(seq 1 300); do curl -s -o /dev/null http://localhost/projeto-korp; \
-	  [ $$((i % 10)) -eq 0 ] && curl -s -o /dev/null http://localhost/rota-inexistente; \
-	  sleep 0.1; done; echo "pronto"
+	@echo "Gerando 300 requisicoes contra $(HOST)..."
+	@fail=0; for i in $$(seq 1 300); do \
+	  curl -fsS -o /dev/null http://$(HOST)/projeto-korp || fail=$$((fail+1)); \
+	  if [ $$((i % 10)) -eq 0 ]; then \
+	    curl -sS -o /dev/null http://$(HOST)/rota-inexistente; \
+	  fi; \
+	  sleep 0.1; \
+	done; \
+	if [ $$fail -gt 0 ]; then echo "FALHA: $$fail de 300 requisicoes nao completaram"; exit 1; fi; \
+	echo "pronto"
 
 # --- Ansible -----------------------------------------------------------------
 .PHONY: deps

@@ -12,6 +12,7 @@ korp_build_nocache: false
 
 # Em producao viria de um cofre (ansible-vault, Vault, SSM).
 korp_grafana_user: admin
-korp_grafana_password: admin
+# Sem default de propósito: se group_vars nao definir, o playbook falha
+# com "undefined variable" em vez de subir silenciosamente com admin.
 
 korp_log_level: info
