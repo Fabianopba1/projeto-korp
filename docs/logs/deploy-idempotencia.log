@@ -1,0 +1,315 @@
+
+PLAY [Provisionar o ambiente do Projeto Korp] **********************************
+quinta 03 setembro 2026  03:15:29 -0300 (0:00:00.018)       0:00:00.018 ******* 
+
+TASK [Gathering Facts] *********************************************************
+ok: [korp-devops]
+quinta 03 setembro 2026  03:15:31 -0300 (0:00:01.284)       0:00:01.303 ******* 
+
+TASK [Exibir o alvo do provisionamento] ****************************************
+ok: [korp-devops] => {
+    "msg": "Provisionando korp-devops (Debian 13.6, x86_64)"
+}
+quinta 03 setembro 2026  03:15:31 -0300 (0:00:00.016)       0:00:01.319 ******* 
+
+TASK [Verificar se o codigo-fonte esta acessivel no control node] **************
+ok: [korp-devops -> localhost]
+quinta 03 setembro 2026  03:15:31 -0300 (0:00:00.243)       0:00:01.563 ******* 
+
+TASK [Falhar cedo se o repositorio nao for encontrado] *************************
+ok: [korp-devops] => {
+    "changed": false,
+    "msg": "Codigo-fonte localizado em /home/fabiano/Projetos/projeto-korp/ansible/.."
+}
+quinta 03 setembro 2026  03:15:31 -0300 (0:00:00.016)       0:00:01.580 ******* 
+
+TASK [docker : Falhar cedo se a distribuicao nao for suportada] ****************
+ok: [korp-devops] => {
+    "changed": false,
+    "msg": "Distribuicao suportada: Debian 13.6"
+}
+quinta 03 setembro 2026  03:15:31 -0300 (0:00:00.017)       0:00:01.597 ******* 
+
+TASK [docker : Instalar pre-requisitos do apt] *********************************
+ok: [korp-devops]
+quinta 03 setembro 2026  03:15:37 -0300 (0:00:06.094)       0:00:07.692 ******* 
+
+TASK [docker : Criar diretorio de chaves do apt] *******************************
+ok: [korp-devops]
+quinta 03 setembro 2026  03:15:37 -0300 (0:00:00.333)       0:00:08.026 ******* 
+
+TASK [docker : Baixar a chave GPG oficial do Docker] ***************************
+ok: [korp-devops]
+quinta 03 setembro 2026  03:15:38 -0300 (0:00:00.745)       0:00:08.771 ******* 
+
+TASK [docker : Adicionar o repositorio oficial do Docker (formato deb822)] *****
+ok: [korp-devops]
+quinta 03 setembro 2026  03:15:39 -0300 (0:00:00.407)       0:00:09.179 ******* 
+
+TASK [docker : Instalar Docker Engine e plugins] *******************************
+ok: [korp-devops]
+quinta 03 setembro 2026  03:15:50 -0300 (0:00:11.152)       0:00:20.331 ******* 
+quinta 03 setembro 2026  03:15:50 -0300 (0:00:00.010)       0:00:20.342 ******* 
+quinta 03 setembro 2026  03:15:50 -0300 (0:00:00.010)       0:00:20.353 ******* 
+quinta 03 setembro 2026  03:15:50 -0300 (0:00:00.010)       0:00:20.364 ******* 
+
+TASK [docker : Configurar o daemon (rotacao de log e driver de storage)] *******
+ok: [korp-devops]
+quinta 03 setembro 2026  03:15:51 -0300 (0:00:00.845)       0:00:21.210 ******* 
+quinta 03 setembro 2026  03:15:51 -0300 (0:00:00.011)       0:00:21.221 ******* 
+
+TASK [docker : Instalar o SDK Python do Docker (via gerenciador de pacotes)] ***
+ok: [korp-devops]
+quinta 03 setembro 2026  03:15:51 -0300 (0:00:00.771)       0:00:21.993 ******* 
+
+TASK [docker : Descobrir a versao do SDK efetivamente instalada] ***************
+ok: [korp-devops]
+quinta 03 setembro 2026  03:15:52 -0300 (0:00:00.513)       0:00:22.506 ******* 
+
+TASK [docker : Exibir o diagnostico do SDK] ************************************
+ok: [korp-devops] => {
+    "msg": "SDK Docker: 7.1.0 (minimo exigido: 7.0.0)"
+}
+quinta 03 setembro 2026  03:15:52 -0300 (0:00:00.040)       0:00:22.546 ******* 
+quinta 03 setembro 2026  03:15:52 -0300 (0:00:00.014)       0:00:22.561 ******* 
+
+TASK [docker : Garantir que o servico Docker esteja iniciado e habilitado no boot] ***
+ok: [korp-devops]
+quinta 03 setembro 2026  03:15:53 -0300 (0:00:00.729)       0:00:23.291 ******* 
+
+TASK [docker : Adicionar o usuario ao grupo docker] ****************************
+ok: [korp-devops]
+quinta 03 setembro 2026  03:15:53 -0300 (0:00:00.452)       0:00:23.743 ******* 
+
+TASK [docker : Coletar a versao instalada do Docker] ***************************
+ok: [korp-devops]
+quinta 03 setembro 2026  03:15:53 -0300 (0:00:00.264)       0:00:24.008 ******* 
+
+TASK [docker : Coletar a versao do plugin Compose] *****************************
+ok: [korp-devops]
+quinta 03 setembro 2026  03:15:54 -0300 (0:00:00.304)       0:00:24.312 ******* 
+
+TASK [docker : Exibir as versoes instaladas] ***********************************
+ok: [korp-devops] => {
+    "msg": [
+        "Docker version 29.7.2, build a7dcaa6",
+        "Docker Compose version v5.5.0"
+    ]
+}
+quinta 03 setembro 2026  03:15:54 -0300 (0:00:00.016)       0:00:24.328 ******* 
+
+TASK [korp_stack : Criar a arvore de diretorios do projeto] ********************
+ok: [korp-devops] => (item=/opt/projeto-korp)
+ok: [korp-devops] => (item=/opt/projeto-korp/app)
+ok: [korp-devops] => (item=/opt/projeto-korp/docker)
+ok: [korp-devops] => (item=/opt/projeto-korp/docker/nginx/conf.d)
+ok: [korp-devops] => (item=/opt/projeto-korp/docker/prometheus)
+ok: [korp-devops] => (item=/opt/projeto-korp/docker/grafana/provisioning/datasources)
+ok: [korp-devops] => (item=/opt/projeto-korp/docker/grafana/provisioning/dashboards)
+quinta 03 setembro 2026  03:15:56 -0300 (0:00:02.059)       0:00:26.388 ******* 
+
+TASK [korp_stack : Copiar o codigo-fonte da aplicacao Go] **********************
+ok: [korp-devops]
+quinta 03 setembro 2026  03:16:02 -0300 (0:00:06.184)       0:00:32.573 ******* 
+
+TASK [korp_stack : Copiar a configuracao de proxy reverso do NGINX] ************
+ok: [korp-devops]
+quinta 03 setembro 2026  03:16:03 -0300 (0:00:00.555)       0:00:33.129 ******* 
+
+TASK [korp_stack : Copiar as configuracoes do Prometheus] **********************
+ok: [korp-devops] => (item=prometheus.yml)
+ok: [korp-devops] => (item=alerts.yml)
+quinta 03 setembro 2026  03:16:04 -0300 (0:00:01.319)       0:00:34.448 ******* 
+
+TASK [korp_stack : Copiar o provisionamento do Grafana (datasource e dashboard)] ***
+ok: [korp-devops]
+quinta 03 setembro 2026  03:16:06 -0300 (0:00:02.034)       0:00:36.483 ******* 
+
+TASK [korp_stack : Copiar o arquivo docker-compose.yml] ************************
+ok: [korp-devops]
+quinta 03 setembro 2026  03:16:07 -0300 (0:00:00.779)       0:00:37.263 ******* 
+
+TASK [korp_stack : Gerar o arquivo .env com as variaveis da stack] *************
+ok: [korp-devops]
+quinta 03 setembro 2026  03:16:07 -0300 (0:00:00.698)       0:00:37.962 ******* 
+
+TASK [korp_stack : Criar a rede Docker em modo bridge] *************************
+ok: [korp-devops]
+quinta 03 setembro 2026  03:16:08 -0300 (0:00:00.575)       0:00:38.537 ******* 
+
+TASK [korp_stack : Exibir os dados da rede criada] *****************************
+ok: [korp-devops] => {
+    "msg": "Rede 'korp-net' pronta (driver: bridge, subnet: 172.28.0.0/16)"
+}
+quinta 03 setembro 2026  03:16:08 -0300 (0:00:00.017)       0:00:38.554 ******* 
+
+TASK [korp_stack : Construir a imagem do http-server-projeto-korp] *************
+ok: [korp-devops]
+quinta 03 setembro 2026  03:16:09 -0300 (0:00:00.640)       0:00:39.194 ******* 
+
+TASK [korp_stack : Exibir o resultado do build] ********************************
+ok: [korp-devops] => {
+    "msg": "Imagem http-server-projeto-korp:1.0.0 ja estava atualizada"
+}
+quinta 03 setembro 2026  03:16:09 -0300 (0:00:00.015)       0:00:39.209 ******* 
+
+TASK [korp_stack : Subir a stack com docker compose] ***************************
+ok: [korp-devops]
+quinta 03 setembro 2026  03:16:11 -0300 (0:00:02.013)       0:00:41.223 ******* 
+
+TASK [korp_stack : Aguardar os quatro containers da stack ficarem em execucao] ***
+ok: [korp-devops]
+quinta 03 setembro 2026  03:16:11 -0300 (0:00:00.600)       0:00:41.823 ******* 
+
+TASK [korp_stack : Coletar o estado detalhado dos containers] ******************
+ok: [korp-devops]
+quinta 03 setembro 2026  03:16:11 -0300 (0:00:00.282)       0:00:42.106 ******* 
+
+TASK [korp_stack : Exibir o estado dos containers] *****************************
+ok: [korp-devops] => {
+    "msg": [
+        "/http-server-projeto-korp | running | healthy",
+        "/nginx-projeto-korp | running | healthy",
+        "/prometheus-projeto-korp | running | healthy",
+        "/grafana-projeto-korp | running | healthy"
+    ]
+}
+quinta 03 setembro 2026  03:16:12 -0300 (0:00:00.015)       0:00:42.121 ******* 
+
+TASK [validate : Aguardar a porta 80 aceitar conexoes] *************************
+ok: [korp-devops]
+quinta 03 setembro 2026  03:16:14 -0300 (0:00:02.341)       0:00:44.463 ******* 
+
+TASK [validate : Requisicao HTTP: GET http://localhost:80/projeto-korp] ********
+ok: [korp-devops]
+quinta 03 setembro 2026  03:16:15 -0300 (0:00:00.698)       0:00:45.162 ******* 
+
+TASK [validate : Validar o contrato do JSON retornado] *************************
+ok: [korp-devops] => {
+    "changed": false,
+    "msg": "Contrato validado: campo 'nome' correto e 'horario' em UTC (RFC3339)."
+}
+quinta 03 setembro 2026  03:16:15 -0300 (0:00:00.021)       0:00:45.184 ******* 
+Pausing for 2 seconds
+(ctrl+C then 'C' = continue early, ctrl+C then 'A' = abort)
+
+TASK [validate : Aguardar mais de um segundo antes da segunda requisicao] ******
+ok: [korp-devops]
+quinta 03 setembro 2026  03:16:17 -0300 (0:00:02.017)       0:00:47.201 ******* 
+
+TASK [validate : Segunda requisicao para comparar o horario] *******************
+ok: [korp-devops]
+quinta 03 setembro 2026  03:16:17 -0300 (0:00:00.440)       0:00:47.642 ******* 
+
+TASK [validate : Confirmar que o horario muda entre requisicoes] ***************
+ok: [korp-devops] => {
+    "changed": false,
+    "msg": "Horario resolvido dinamicamente (2026-09-03T06:16:14Z -> 2026-09-03T06:16:17Z)."
+}
+quinta 03 setembro 2026  03:16:17 -0300 (0:00:00.016)       0:00:47.659 ******* 
+
+TASK [validate : Verificar se o NGINX bloqueia /metrics na borda] **************
+ok: [korp-devops]
+quinta 03 setembro 2026  03:16:17 -0300 (0:00:00.361)       0:00:48.021 ******* 
+
+TASK [validate : Consultar os targets do Prometheus] ***************************
+ok: [korp-devops]
+quinta 03 setembro 2026  03:16:18 -0300 (0:00:00.381)       0:00:48.402 ******* 
+
+TASK [validate : Verificar a saude do Grafana] *********************************
+ok: [korp-devops]
+quinta 03 setembro 2026  03:16:18 -0300 (0:00:00.347)       0:00:48.750 ******* 
+
+TASK [validate : Confirmar que o datasource do Grafana foi provisionado] *******
+ok: [korp-devops]
+quinta 03 setembro 2026  03:16:19 -0300 (0:00:00.375)       0:00:49.125 ******* 
+
+TASK [validate : Confirmar que o dashboard foi provisionado] *******************
+ok: [korp-devops]
+quinta 03 setembro 2026  03:16:19 -0300 (0:00:00.368)       0:00:49.493 ******* 
+
+TASK [validate : RESPOSTA DO SERVICO] ******************************************
+ok: [korp-devops] => {
+    "msg": [
+        "==================================================================",
+        "  GET http://localhost:80/projeto-korp   (executado em korp-devops)",
+        "==================================================================",
+        "  HTTP 200",
+        "  Content-Type: application/json; charset=utf-8",
+        "",
+        "  {\"nome\":\"Projeto Korp\",\"horario\":\"2026-09-03T06:16:14Z\"}\n",
+        "",
+        "  nome    : Projeto Korp",
+        "  horario : 2026-09-03T06:16:14Z  (UTC)",
+        "=================================================================="
+    ]
+}
+quinta 03 setembro 2026  03:16:19 -0300 (0:00:00.041)       0:00:49.535 ******* 
+
+TASK [validate : RESUMO DO PROVISIONAMENTO] ************************************
+ok: [korp-devops] => {
+    "msg": [
+        "==================================================================",
+        "  AMBIENTE PROJETO KORP",
+        "==================================================================",
+        "  Aplicacao via NGINX  : OK",
+        "  Contrato JSON        : OK (nome + horario em UTC)",
+        "  Horario dinamico     : OK (2026-09-03T06:16:14Z -> 2026-09-03T06:16:17Z)",
+        "  /metrics protegido   : OK (bloqueado na borda)",
+        "  Prometheus coletando : OK",
+        "  Grafana              : ok",
+        "  Datasource           : provisionado",
+        "  Dashboard            : provisionado",
+        "------------------------------------------------------------------",
+        "  Servico     http://192.168.0.161/projeto-korp",
+        "  Prometheus  http://127.0.0.1:9090  (apenas na VM)",
+        "              tunel: ssh -L 9090:127.0.0.1:9090 korp@192.168.0.161",
+        "  Grafana     http://192.168.0.161:3000  (usuario: admin)",
+        "=================================================================="
+    ]
+}
+quinta 03 setembro 2026  03:16:19 -0300 (0:00:00.046)       0:00:49.582 ******* 
+
+TASK [validate : Falhar o playbook se a validacao principal nao passou] ********
+ok: [korp-devops] => {
+    "changed": false,
+    "msg": "Validacao concluida com sucesso."
+}
+quinta 03 setembro 2026  03:16:19 -0300 (0:00:00.016)       0:00:49.598 ******* 
+
+TASK [Provisionamento concluido] ***********************************************
+ok: [korp-devops] => {
+    "msg": "Ambiente Projeto Korp provisionado com sucesso em korp-devops."
+}
+
+PLAY RECAP *********************************************************************
+korp-devops                : ok=49   changed=0    unreachable=0    failed=0    skipped=4    rescued=0    ignored=0   
+
+
+TASKS RECAP ********************************************************************
+quinta 03 setembro 2026  03:16:19 -0300 (0:00:00.014)       0:00:49.613 ******* 
+=============================================================================== 
+docker : Instalar Docker Engine e plugins ------------------------------ 11.15s
+korp_stack : Copiar o codigo-fonte da aplicacao Go ---------------------- 6.18s
+docker : Instalar pre-requisitos do apt --------------------------------- 6.09s
+validate : Aguardar a porta 80 aceitar conexoes ------------------------- 2.34s
+korp_stack : Criar a arvore de diretorios do projeto -------------------- 2.06s
+korp_stack : Copiar o provisionamento do Grafana (datasource e dashboard) --- 2.03s
+validate : Aguardar mais de um segundo antes da segunda requisicao ------ 2.02s
+korp_stack : Subir a stack com docker compose --------------------------- 2.01s
+korp_stack : Copiar as configuracoes do Prometheus ---------------------- 1.32s
+Gathering Facts --------------------------------------------------------- 1.28s
+docker : Configurar o daemon (rotacao de log e driver de storage) ------- 0.85s
+korp_stack : Copiar o arquivo docker-compose.yml ------------------------ 0.78s
+docker : Instalar o SDK Python do Docker (via gerenciador de pacotes) --- 0.77s
+docker : Baixar a chave GPG oficial do Docker --------------------------- 0.75s
+docker : Garantir que o servico Docker esteja iniciado e habilitado no boot --- 0.73s
+validate : Requisicao HTTP: GET http://localhost:80/projeto-korp -------- 0.70s
+korp_stack : Gerar o arquivo .env com as variaveis da stack ------------- 0.70s
+korp_stack : Construir a imagem do http-server-projeto-korp ------------- 0.64s
+korp_stack : Aguardar os quatro containers da stack ficarem em execucao --- 0.60s
+korp_stack : Criar a rede Docker em modo bridge ------------------------- 0.58s
+
+PLAYBOOK RECAP *****************************************************************
+Playbook run took 0 days, 0 hours, 0 minutes, 49 seconds
+

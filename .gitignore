@@ -31,3 +31,4 @@ ansible/collections/
 .vscode/
 .DS_Store
 *.swp
+docs/00-plano-de-execucao.md

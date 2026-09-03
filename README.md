@@ -11,14 +11,14 @@ técnico de Analista DevOps.
                            :80
                             │
               ┌─────────────▼──────────────┐
-              │  nginx                     │   única porta publicada
+              │  nginx                     │   publicado em 0.0.0.0:80
               │  proxy reverso → :8080     │
               └─────────────┬──────────────┘
                             │
     ════════════════════════╪════════════════════  rede bridge korp-net
                             │
               ┌─────────────▼──────────────┐
-              │  http-server-projeto-korp  │   sem portas expostas ao host
+              │  http-server-projeto-korp  │   sem portas publicadas
               │  :8080                     │
               │  GET /projeto-korp         │
               │  GET /health  GET /ready   │
@@ -26,16 +26,32 @@ técnico de Analista DevOps.
               └─────────────┬──────────────┘
                             │ scrape a cada 15s
               ┌─────────────▼──────────────┐
-              │  prometheus :9090          │
+              │  prometheus :9090          │   publicado só em 127.0.0.1
               └─────────────┬──────────────┘
                             │ query
               ┌─────────────▼──────────────┐
-              │  grafana :3000             │   datasource e dashboard
-              └────────────────────────────┘   provisionados como código
+              │  grafana :3000             │   publicado em 0.0.0.0:3000
+              └────────────────────────────┘   datasource e dashboard
+                                               provisionados como código
 ```
 
 A aplicação não publica portas no host. Só o NGINX e o Prometheus a
 alcançam, de dentro da rede `korp-net`.
+
+O Prometheus tem um único consumidor — o Grafana, que o alcança pelo DNS
+interno da rede em `prometheus:9090`. Por isso ele é publicado apenas no
+loopback do host: publicá-lo em todas as interfaces não atenderia nenhum
+consumidor legítimo e exporia na rede local uma API sem autenticação, capaz
+de revelar volumetria e rotas internas. A UI de targets e alertas continua
+acessível por encaminhamento de porta:
+
+```bash
+ssh -L 9090:127.0.0.1:9090 korp@<ip-da-vm>
+# depois: http://localhost:9090/targets
+```
+
+O resumo final do playbook imprime esse comando pronto, com usuário e host
+já preenchidos.
 
 O ambiente foi validado provisionando uma VM Debian 13 via SSH a partir de
 um control node separado. As mesmas roles funcionam contra `localhost`,
@@ -81,17 +97,19 @@ máquina, troque a linha do host por `localhost ansible_connection=local`.
 
 A senha do Grafana está criptografada em `ansible/group_vars/all/vault.yml`,
 e a senha que abre esse arquivo (`ansible/vault-pass.txt`) não é versionada.
-Quem clonar o repositório precisa fornecer a sua própria:
+Quem clonar o repositório define a sua própria, em dois comandos:
 
 ```bash
 cd ansible
-echo "uma-senha-qualquer" > vault-pass.txt && chmod 600 vault-pass.txt
-rm group_vars/all/vault.yml
-printf -- '---\nvault_korp_grafana_password: "escolha-uma-senha"\n' > /tmp/v.yml
-ansible-vault encrypt /tmp/v.yml --output group_vars/all/vault.yml \
-  --vault-password-file vault-pass.txt
-shred -u /tmp/v.yml
+echo "senha-do-cofre" > vault-pass.txt && chmod 600 vault-pass.txt
+ansible-vault encrypt_string 'senha-do-grafana' \
+  --name vault_korp_grafana_password > group_vars/all/vault.yml
 ```
+
+O `ansible.cfg` já aponta `vault_password_file` para `vault-pass.txt`, então
+`make deploy` volta a ser um único comando a partir daí. A alternativa
+interativa, sem arquivo de senha em disco, é
+`ansible-playbook site.yml --ask-vault-pass`.
 
 Sem Ansible, só com Docker:
 
@@ -257,6 +275,9 @@ Grafana responde?" teria dado verde o tempo todo.
   lê-lo, mesmo com o usuário no grupo `docker` — permissão do daemon e
   permissão de arquivo são coisas diferentes. O playbook não é afetado
   porque roda com `become`.
+- A UI do Prometheus só é alcançável da própria VM; a inspeção externa
+  depende de encaminhamento de porta por SSH. Em produção, ele ficaria atrás
+  do proxy reverso em `/prometheus`, com autenticação na borda.
 - Sem TLS, sem Alertmanager, sem alta disponibilidade. As regras de alerta
   existem e aparecem em `:9090/alerts`, mas não notificam ninguém.
 - Prometheus com armazenamento local e retenção de 15 dias.

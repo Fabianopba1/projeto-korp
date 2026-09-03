@@ -63,6 +63,10 @@
     src: env.j2
     dest: "{{ korp_project_dir }}/docker/.env"
     mode: "0600"   # contem a senha do Grafana
+  # O vault protege o segredo em repouso, nao na saida: depois de resolvida,
+  # a variavel e texto comum e `ansible-playbook --diff` imprimiria o .env
+  # renderizado, com a senha, no console.
+  no_log: true
 
 # Criada aqui porque o compose a declara como external.
 - name: Criar a rede Docker em modo bridge
