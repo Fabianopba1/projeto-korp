@@ -12,4 +12,6 @@ korp_app_version: "1.0.0"
 korp_log_level: info
 
 korp_grafana_user: admin
-korp_grafana_password: admin
+# O valor real vive em vault.yml, criptografado. A indirecao com prefixo
+# vault_ permite localizar onde o segredo e usado sem descriptografar nada.
+korp_grafana_password: "{{ vault_korp_grafana_password }}"

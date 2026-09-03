@@ -22,6 +22,16 @@ echo "==============================================================="
 
 $S "echo ok" >/dev/null 2>&1 || { echo "SSH indisponivel. Abortando."; exit 1; }
 
+# A credencial do Grafana e lida do .env que o Ansible gera no host alvo,
+# que e a fonte da verdade. Assim o script nao precisa conhecer a senha nem
+# ser editado quando ela muda. O fallback cobre o caso de a stack ainda nao
+# ter subido.
+ENV_ALVO=/opt/projeto-korp/docker/.env
+GF_USER=$($S "sudo grep '^GRAFANA_USER=' $ENV_ALVO 2>/dev/null | cut -d= -f2-" 2>/dev/null)
+GF_PASS=$($S "sudo grep '^GRAFANA_PASSWORD=' $ENV_ALVO 2>/dev/null | cut -d= -f2-" 2>/dev/null)
+GF_USER="${GF_USER:-admin}"
+GF_PASS="${GF_PASS:-admin}"
+
 secao "PARTE 1.1 - Servico HTTP"
 
 item "requisito: o servico deve se chamar http-server-projeto-korp"
@@ -192,12 +202,12 @@ echo "$GH" | grep -qE '"database"[[:space:]]*:[[:space:]]*"ok"' \
   || vermelho "grafana nao responde"
 
 item "bonus: datasource provisionado por arquivo"
-DS=$($S "curl -s -u admin:admin --max-time 5 http://localhost:3000/api/datasources/uid/prometheus-korp" 2>/dev/null)
+DS=$($S "curl -s -u \"$GF_USER:$GF_PASS\" --max-time 5 http://localhost:3000/api/datasources/uid/prometheus-korp" 2>/dev/null)
 echo "$DS" | grep -q '"type":"prometheus"' && verde "datasource prometheus-korp provisionado" \
                                            || vermelho "datasource nao encontrado"
 
 item "requisito: dashboard disponivel no Grafana"
-DB=$($S "curl -s -u admin:admin --max-time 5 http://localhost:3000/api/dashboards/uid/http-server-projeto-korp" 2>/dev/null)
+DB=$($S "curl -s -u \"$GF_USER:$GF_PASS\" --max-time 5 http://localhost:3000/api/dashboards/uid/http-server-projeto-korp" 2>/dev/null)
 if echo "$DB" | grep -q '"title"'; then
   NP=$(echo "$DB" | grep -o '"type":"timeseries"\|"type":"stat"' | wc -l)
   verde "dashboard provisionado ($NP paineis de dados)"
