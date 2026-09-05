@@ -309,6 +309,29 @@ Dashboards exportados do Grafana vêm com centenas de linhas de ruído e são
 irrevisáveis em pull request. O JSON aqui foi gerado por script, é legível e
 tem diff útil.
 
+### E.4.1 O que o dashboard não mostra quando o serviço cai
+
+O teste destrutivo (registrado em `02-registro-de-execucao.md`) expôs um
+limite do dashboard que vale declarar em vez de deixar o avaliador descobrir.
+
+Com a aplicação parada, o painel **"Taxa de Sucesso (5m)" exibiu 100% em
+verde** e o **"Uptime do Processo" congelou** no último valor. A causa é que
+as duas métricas vêm de contadores instrumentados dentro da aplicação Go:
+processo parado não emite amostras, o `rate()` não atualiza, e o redutor
+`lastNotNull` mostra o último valor conhecido em vez de "sem dados".
+
+É o efeito colateral da correção do redutor (`lastNonNull` → `lastNotNull`):
+ele resolve o painel em branco, mas nunca sinaliza ausência de dados.
+
+O contraste dentro do mesmo dashboard é o argumento: o painel **"Status
+Atual" mostrou FORA DO AR corretamente**, porque lê `up`, métrica gerada pelo
+Prometheus a partir do sucesso do scrape — de fora do processo observado.
+É a razão pela qual E.1 expõe disponibilidade de duas formas.
+
+**Em produção:** configurar `No value` explícito nos painéis alimentados por
+métricas da aplicação, ou compor a expressão com `up` para que o painel
+apague quando o alvo cai.
+
 ### E.5 Regras de alerta sem Alertmanager
 
 `alerts.yml` define regras que ficam visíveis em `/alerts` no Prometheus, mas
@@ -476,3 +499,5 @@ identificado.
 | VM criada manualmente | Terraform/OpenTofu, com o playbook rodando logo após o provisionamento |
 | Sem pipeline de CI | GitHub Actions com lint, testes, build e scan de vulnerabilidades (Trivy) |
 | A regra `SemTrafego` não dispara: o healthcheck em `/health` mantém a soma acima de zero (ver E.6) | Filtrar `path!="/health"` na expressão, ou excluir o healthcheck do middleware de métricas |
+| Painéis alimentados por métricas da aplicação exibem o último valor conhecido quando o serviço cai, em vez de "sem dados" (ver E.4.1) | `No value` explícito nos painéis, ou compor a expressão com `up` |
+| Erros gerados na borda (502 do NGINX) não aparecem em `korp_http_requests_total`, que é instrumentada dentro da aplicação | Expor métricas do próprio NGINX (`nginx-prometheus-exporter` ou `stub_status`) |

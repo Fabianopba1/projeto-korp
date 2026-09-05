@@ -76,11 +76,20 @@ fi
 
 item "verificacao extra: o horario confere com o relogio real"
 AGORA=$(date -u +%s)
-SERV=$(date -u -d "$H2" +%s 2>/dev/null)
-if [[ -n "$SERV" ]]; then
-  D=$(( AGORA > SERV ? AGORA - SERV : SERV - AGORA ))
-  (( D <= 5 )) && verde "diferenca com o relogio do control node: ${D}s" \
-               || vermelho "horario divergente em ${D}s"
+# Guarda contra H2 vazio: `date -d ""` devolve a meia-noite de hoje, o que
+# produziria uma "divergencia de relogio" enganosa quando o real problema e
+# que a aplicacao nao respondeu.
+if [[ -z "$H2" ]]; then
+  vermelho "sem horario para comparar (a aplicacao nao respondeu)"
+else
+  SERV=$(date -u -d "$H2" +%s 2>/dev/null)
+  if [[ -n "$SERV" ]]; then
+    D=$(( AGORA > SERV ? AGORA - SERV : SERV - AGORA ))
+    (( D <= 5 )) && verde "diferenca com o relogio do control node: ${D}s" \
+                 || vermelho "horario divergente em ${D}s"
+  else
+    vermelho "horario '$H2' nao pode ser interpretado como data"
+  fi
 fi
 
 secao "PARTE 1.2 - Docker instalado e configurado"
@@ -188,11 +197,23 @@ MC=$($S "curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:80
 secao "PARTE 2.2 - Prometheus e Grafana"
 
 item "requisito: prometheus coletando as metricas do servico"
+# Filtra pelo job da aplicacao. Um grep generico por '"health":"up"' na
+# resposta inteira e satisfeito pelo self-scrape do proprio Prometheus, e o
+# check passaria com a aplicacao parada. Descoberto em teste destrutivo.
 H=$($S "curl -s --max-time 5 'http://localhost:9090/api/v1/targets?state=active'" 2>/dev/null)
-if echo "$H" | grep -q '"health":"up"'; then
+HEALTH=$(printf '%s' "$H" | python3 -c "
+import json, sys
+try:
+    alvos = json.load(sys.stdin)['data']['activeTargets']
+    app = [t for t in alvos if t['labels'].get('job') == 'http-server-projeto-korp']
+    print(app[0]['health'] if app else 'target-ausente')
+except Exception:
+    print('resposta-invalida')
+" 2>/dev/null)
+if [[ "$HEALTH" == "up" ]]; then
   verde "target http-server-projeto-korp com health=up"
 else
-  vermelho "target nao esta up no Prometheus"
+  vermelho "target http-server-projeto-korp com health=${HEALTH:-sem-resposta}"
 fi
 
 item "requisito: grafana configurado para visualizar as metricas"

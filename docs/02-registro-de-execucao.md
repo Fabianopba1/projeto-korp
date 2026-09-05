@@ -312,8 +312,10 @@ verdade no Grafana com a credencial lida do `.env` do host alvo.
 
 ## Problemas encontrados e soluções
 
-Sete defeitos reais encontrados durante o desenvolvimento. Cada um está
-descrito em detalhe no `README.md`; a tabela resume causa raiz e correção.
+Nove defeitos reais encontrados durante o projeto. Os sete primeiros durante
+o desenvolvimento e estão descritos em detalhe no `README.md`; os dois últimos
+foram revelados pelo teste destrutivo documentado adiante. A tabela resume
+causa raiz e correção.
 
 | # | Problema | Causa raiz | Solução |
 |---|---|---|---|
@@ -325,9 +327,13 @@ descrito em detalhe no `README.md`; a tabela resume causa raiz e correção.
 | 6 | Containers caíam logo após a mensagem de sucesso | O handler que reinicia o daemon Docker após escrever o `daemon.json` só executa no fim do play, derrubando a stack já validada | `flush_handlers` logo após a task de configuração do daemon |
 | 7 | Autenticação no Grafana falhava com a senha nova **e** com a antiga | `GF_SECURITY_ADMIN_PASSWORD` só é aplicada quando o Grafana cria o banco. O volume `grafana-data` já existia com o usuário admin gravado, e a senha havia sido alterada pela interface num acesso anterior | Volume recriado. O contraste é o argumento central a favor de provisionamento como código: datasource e dashboard, declarados em arquivo, voltaram idênticos a cada deploy; a senha, que vive só no volume, divergiu em silêncio |
 
-O problema 7 só apareceu porque o `verify.sh` autentica de verdade. Uma
-checagem que apenas perguntasse "o Grafana responde?" teria dado verde o
-tempo todo.
+| 8 | O check "prometheus coletando as métricas" ficava verde com a aplicação parada | `grep '"health":"up"'` varria a resposta inteira da API de targets; o self-scrape do próprio Prometheus satisfazia o padrão | Passou a filtrar pelo job `http-server-projeto-korp` e a reportar o estado real (`down`, `target-ausente`, `resposta-invalida`) |
+| 9 | Com a aplicação parada, o script acusava `horario divergente em 57693s` | Sem resposta, `$H2` fica vazio e `date -u -d ""` devolve a meia-noite de hoje; a diferença medida eram só as horas do dia | Guarda explícita para `$H2` vazio, com mensagem "sem horário para comparar" |
+
+Os problemas 8 e 9 têm a mesma raiz metodológica: as duas checagens nunca
+haviam sido executadas contra um ambiente quebrado. O 7 só apareceu porque o
+`verify.sh` autentica de verdade — uma checagem que apenas perguntasse "o
+Grafana responde?" teria dado verde o tempo todo.
 
 ---
 
@@ -387,6 +393,152 @@ não tê-la aplicado às vésperas da entrega.
 O rótulo `other` na terceira linha é a proteção de cardinalidade em ação: as
 requisições do `make load` para rotas inexistentes caem num balde fixo em vez
 de criar uma série nova por URL.
+
+---
+
+## Teste destrutivo — provando que as verificações falham
+
+Uma verificação que passa sempre não é verificação. O `verify.sh` acumulava
+32 checagens verdes, mas nenhuma delas havia sido vista em vermelho. O ciclo
+abaixo derruba a aplicação de propósito para responder a uma pergunta
+objetiva: **as checagens conseguem acusar a falha?**
+
+### Estado inicial
+
+Stack saudável, `verify.sh` em 32 OK / 0 falhas, as seis regras de alerta em
+`inactive`.
+
+### A quebra
+
+```
+# docker stop http-server-projeto-korp
+http-server-projeto-korp
+```
+
+Dois sintomas diferentes para a mesma falha, dependendo de onde a requisição
+nasce:
+
+```
+# do control node
+# curl -i --max-time 5 http://<ip-da-vm>/projeto-korp
+curl: (28) Operation timed out after 5002 milliseconds
+
+# de dentro da VM, no mesmo instante
+HTTP/1.1 502 Bad Gateway
+```
+
+A explicação está no keepalive do upstream: o NGINX mantém conexões abertas
+com o backend num pool. A primeira requisição após a queda pega uma conexão
+morta e espera o `proxy_read_timeout` (60 s por padrão), acima dos 5 s do
+`--max-time`. As seguintes já não encontram conexão no pool, tentam abrir uma
+nova, levam recusa e devolvem 502 de imediato.
+
+### Primeira rodada de verificação
+
+```
+RESULTADO: 21 OK / 11 falhas
+```
+
+As checagens acusaram — mas uma delas **passou quando não devia**:
+
+```
+requisito: prometheus coletando as metricas do servico
+ OK  target http-server-projeto-korp com health=up
+```
+
+### Defeito encontrado no próprio script
+
+A implementação usava `grep '"health":"up"'` sobre a resposta inteira da API
+de targets. O Prometheus faz self-scrape, então o target dele próprio
+satisfazia o padrão: o check nunca olhava o job da aplicação. Duas seções
+acima, o check equivalente consultava `up{job="http-server-projeto-korp"}` —
+seletor específico — e falhou corretamente. Mesma pergunta, dois níveis de
+rigor.
+
+Corrigido para filtrar pelo job e reportar o estado real:
+
+```
+FALHA target http-server-projeto-korp com health=down
+```
+
+Um segundo defeito apareceu na mesma rodada. A comparação de relógio exibia
+`horario divergente em 57693s` — mas o relógio não havia divergido. Com a
+resposta vazia, `date -u -d ""` devolve a meia-noite de hoje, e os 57.693
+segundos eram apenas as horas decorridas desde então. A checagem falhava pelo
+motivo certo com a mensagem errada, o que num incidente real levaria alguém a
+investigar NTP em vez do container. Passou a distinguir "sem horário para
+comparar" de "horário divergente".
+
+```
+RESULTADO: 20 OK / 12 falhas
+```
+
+### Detecção pelos alertas
+
+`scrape_interval` de 15 s e `for: 1m` na regra. A transição observada foi
+`inactive` → `pending` → `firing`, no tempo esperado:
+
+```
+ServicoIndisponivel           firing     up == 0 por mais de 1 minuto
+DisponibilidadeAbaixoDoSLO    firing     media de 1h abaixo de 99%, apos for: 5m
+ServicoReiniciouRecentemente  inactive   korp_uptime_seconds sumiu com a aplicacao
+TaxaDeErro5xxAlta             inactive   ver observacao abaixo
+LatenciaP95Alta               inactive   sem requisicoes novas, sem histograma
+SemTrafego                    inactive   alerta inerte, documentado acima
+```
+
+Evidências: `docs/img/alerta-firing.png` (dois alertas em `firing` na UI do
+Prometheus) e `docs/img/dashboard-degradado.png`.
+
+### Duas observações que o teste revelou
+
+**A `TaxaDeErro5xxAlta` não dispara numa queda total, e isso está correto.**
+A métrica `korp_http_requests_total` é instrumentada dentro da aplicação Go.
+Aplicação parada não conta nada — nem sucesso nem erro. Os 502 nascem no
+NGINX, que não é instrumentado. O `ServicoIndisponivel` cobre esse caso pelo
+lado do `up`, mas um cenário de 502 com a aplicação viva não teria alerta. O
+caminho de produção seria expor métricas do próprio NGINX.
+
+**O painel "Taxa de Sucesso (5m)" exibiu 100% em verde com o serviço fora do
+ar.** Mesma causa: sem amostras novas, o `rate()` não atualiza e o redutor
+`lastNotNull` mostra o último valor conhecido, de antes da queda. O painel
+"Uptime do Processo" congelou pelo mesmo motivo. É o efeito colateral da
+correção do defeito 4 (`lastNonNull` → `lastNotNull`): o redutor resolve o
+painel em branco, mas nunca exibe "sem dados". O contraste dentro do mesmo
+dashboard é instrutivo — "Status Atual" mostrou **FORA DO AR** corretamente,
+porque lê `up`, que é gerada pelo Prometheus e não pela aplicação.
+
+### Restauração
+
+```
+TASK [korp_stack : Subir a stack com docker compose]
+changed: [korp-devops]
+
+PLAY RECAP *********************************************************************
+korp-devops : ok=49  changed=1  unreachable=0  failed=0  skipped=4
+```
+
+Uma única task alterada, exatamente a que precisava. As outras 48 reportaram
+`ok`: Docker já instalado, arquivos no lugar, rede existente, imagem já
+atualizada. Isso é **convergência** — o playbook corrige o desvio sem tocar
+no que está correto —, afirmação distinta da idempotência.
+
+```
+RESULTADO: 32 OK / 0 falhas
+```
+
+### O que o ciclo estabeleceu
+
+| Momento | Resultado |
+|---|---|
+| Stack saudável | 32 OK / 0 falhas |
+| Aplicação parada, script original | 21 OK / 11 falhas (um check mentiu) |
+| Aplicação parada, script corrigido | 20 OK / 12 falhas |
+| Após restauração | 32 OK / 0 falhas |
+
+O primeiro e o último placar são numericamente iguais e epistemicamente
+diferentes: o segundo veio depois de se saber que ele consegue virar 20/12
+quando deve.
 
 ---
 
