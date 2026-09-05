@@ -331,6 +331,65 @@ tempo todo.
 
 ---
 
+## Validação das regras de alerta
+
+Validação estática, com o `promtool` que já vem na imagem do Prometheus:
+
+```
+# docker exec prometheus-projeto-korp promtool check config /etc/prometheus/prometheus.yml
+Checking /etc/prometheus/prometheus.yml
+  SUCCESS: 1 rule files found
+ SUCCESS: /etc/prometheus/prometheus.yml is valid prometheus config file syntax
+
+Checking /etc/prometheus/alerts.yml
+  SUCCESS: 6 rules found
+```
+
+Estado das seis regras com a stack saudável — todas `inactive`, nos dois
+grupos (`disponibilidade` e `trafego_e_erros`):
+
+```
+ServicoIndisponivel           inactive
+DisponibilidadeAbaixoDoSLO    inactive
+ServicoReiniciouRecentemente  inactive
+TaxaDeErro5xxAlta             inactive
+LatenciaP95Alta               inactive
+SemTrafego                    inactive
+```
+
+### Um alerta que não consegue disparar
+
+`promtool` confirma sintaxe, não semântica. Percorrendo cada regra com a
+pergunta "sob quais condições isto ficaria verdadeiro?", a `SemTrafego`
+falhou no teste. Medição no ambiente em repouso, sem tráfego de usuário há
+horas:
+
+```
+# sum by (path) (rate(korp_http_requests_total[10m]))
+/health          0.1009 req/s
+/projeto-korp    0.0000 req/s
+other            0.0000 req/s
+
+# sum by (path) (korp_http_requests_total)
+/health          22587
+/projeto-korp    644
+other            83
+```
+
+A expressão `sum(rate(korp_http_requests_total[10m])) == 0` agrega todas as
+rotas, e o healthcheck do Docker bate em `/health` a cada 10 segundos —
+0,1 req/s constantes. A soma nunca chega a zero e o alerta nunca dispara.
+
+Registrado como limitação em `01-rastreabilidade-requisitos.md`, seção E.6,
+com a correção identificada (`path!="/health"` na expressão) e o motivo de
+não tê-la aplicado às vésperas da entrega.
+
+O rótulo `other` na terceira linha é a proteção de cardinalidade em ação: as
+requisições do `make load` para rotas inexistentes caem num balde fixo em vez
+de criar uma série nova por URL.
+
+---
+
 ## Endurecimento aplicado após a primeira versão funcional
 
 Duas mudanças feitas depois de a stack já estar validada, ambas

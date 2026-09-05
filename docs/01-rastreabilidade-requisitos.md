@@ -316,6 +316,47 @@ não há roteamento de notificação. É escopo consciente: mostrar que as regra
 foram pensadas sem inflar a stack com um componente que ninguém vai testar na
 demo.
 
+### E.6 A regra `SemTrafego` não dispara — e por quê
+
+Ao validar as regras uma a uma, uma delas se revelou inerte. A expressão é:
+
+```promql
+sum(rate(korp_http_requests_total[10m])) == 0
+```
+
+O `sum` sem `by` agrega todas as rotas, e o healthcheck do Docker bate em
+`/health` a cada 10 segundos. Medido no ambiente em repouso, sem nenhum
+tráfego de usuário há horas:
+
+```
+/health          0.1009 req/s
+/projeto-korp    0.0000 req/s
+other            0.0000 req/s
+```
+
+A soma nunca chega a zero, então a condição nunca é satisfeita. A regra tem
+sintaxe válida (`promtool check rules` retorna `SUCCESS`) e mesmo assim não
+consegue disparar em nenhuma circunstância — o mesmo defeito de fundo de uma
+verificação que passa sempre.
+
+**A correção seria de uma linha**, separando tráfego de infraestrutura de
+tráfego de usuário:
+
+```promql
+sum(rate(korp_http_requests_total{path!="/health"}[10m])) == 0
+```
+
+**Por que não foi aplicada:** a mudança exige novo deploy e nova rodada de
+verificação numa stack já validada, às vésperas da entrega. O achado foi
+registrado em vez de corrigido às pressas. A alternativa mais limpa — tirar
+`/health` do middleware de métricas, como já é feito com `/metrics` — tem o
+custo de perder a capacidade de detectar que o próprio healthcheck parou.
+
+**O que o episódio ensina:** `promtool` valida sintaxe, não semântica. Uma
+regra pode carregar corretamente e ainda assim ser incapaz de disparar. Só
+percorrer cada alerta perguntando "sob quais condições isto ficaria
+verdadeiro?" expõe esse tipo de defeito.
+
 ---
 
 ## F. Ansible
@@ -434,3 +475,4 @@ identificado.
 | Instância única, sem alta disponibilidade | Réplicas com balanceamento e health checks externos |
 | VM criada manualmente | Terraform/OpenTofu, com o playbook rodando logo após o provisionamento |
 | Sem pipeline de CI | GitHub Actions com lint, testes, build e scan de vulnerabilidades (Trivy) |
+| A regra `SemTrafego` não dispara: o healthcheck em `/health` mantém a soma acima de zero (ver E.6) | Filtrar `path!="/health"` na expressão, ou excluir o healthcheck do middleware de métricas |
