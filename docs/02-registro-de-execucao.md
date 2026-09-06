@@ -238,12 +238,29 @@ introduziram nenhuma task não idempotente.
 
 ### Versões instaladas pelo playbook
 
+Execução sobre ambiente já provisionado (03/09):
+
 ```
 Docker version 29.7.2, build a7dcaa6
 Docker Compose version v5.5.0
 SDK Docker (Python): 7.1.0  (mínimo exigido: 7.0.0)
 Rede 'korp-net' pronta (driver: bridge, subnet: 172.28.0.0/16)
 ```
+
+Deploy a partir de VM limpa (05/09), documentado adiante:
+
+```
+Docker version 29.8.0, build 88096ef
+Docker Compose version v5.5.1
+```
+
+**A diferença é intencional e vale explicitar.** A role instala `docker-ce`
+do repositório oficial sem fixar versão, então o que o playbook reproduz é o
+*processo*, não o *artefato*: dois deploys em datas diferentes produzem
+ambientes com versões diferentes. Para um ambiente de avaliação isso é
+desejável — evita fixar uma versão que envelhece. Em produção, a versão
+seria fixada no `apt` e promovida conscientemente, trocando reprodutibilidade
+do processo por determinismo do resultado.
 
 ### Resposta HTTP exibida pelo próprio playbook
 
@@ -306,7 +323,7 @@ verdade no Grafana com a credencial lida do `.env` do host alvo.
 - [x] Playbook exibiu a resposta HTTP no console
 - [x] Grafana de pé sem toque manual
 - [x] Logs salvos em `docs/logs/`
-- [ ] Rollback do snapshot + deploy do zero <!-- PREENCHER após executar -->
+- [x] Rollback do snapshot + deploy do zero (seção própria adiante)
 
 ---
 
@@ -539,6 +556,135 @@ RESULTADO: 32 OK / 0 falhas
 O primeiro e o último placar são numericamente iguais e epistemicamente
 diferentes: o segundo veio depois de se saber que ele consegue virar 20/12
 quando deve.
+
+---
+
+## Reprodutibilidade — deploy a partir de VM limpa
+
+Idempotência (`changed=0`) e convergência (`changed=1` após um desvio) foram
+demonstradas acima. Nenhuma das duas prova que o ambiente pode ser
+reconstruído do nada. Esta seção fecha essa lacuna.
+
+### Rollback do snapshot
+
+```
+# qm shutdown 610 && qm status 610
+status: stopped
+
+# qm rollback 610 base-limpa
+  Logical volume "vm-610-disk-0" successfully removed.
+  Logical volume "vm-610-disk-0" created.
+  Logical volume pve/vm-610-disk-0 changed.
+
+# qm start 610 && qm status 610
+status: running
+```
+
+A saída do LVM mostra o que acontece por baixo: o disco corrente é
+**destruído** e recriado a partir do snapshot. Não é reversão incremental, é
+substituição — daí a exigência de desligar a VM antes.
+
+Confirmação de que a máquina voltou ao estado de 01/09:
+
+```
+# ssh korp@<ip-da-vm> "docker --version || echo 'sem docker'"
+sem docker
+bash: linha 1: docker: comando não encontrado
+```
+
+### Preflight contra a VM limpa
+
+```
+RESUMO: 47 OK / 1 avisos / 0 falhas
+```
+
+Duas checagens mudaram de estado em relação ao ambiente provisionado e
+passaram a verde: `docker ausente (correto: quem instala e o playbook)` e
+`nenhum servidor web no host`. O script foi escrito para este cenário e só
+agora foi executado contra ele.
+
+O aviso restante é um defeito do próprio `preflight.sh`, registrado como
+limitação em `01-rastreabilidade-requisitos.md`: o parsing de `free -m` não
+casa em sistema com locale pt-BR.
+
+### O deploy
+
+```
+PLAY RECAP *********************************************************************
+korp-devops : ok=52  changed=19  unreachable=0  failed=0  skipped=4
+
+real    3m38,735s
+```
+
+Tarefas mais custosas:
+
+```
+korp_stack : Construir a imagem do http-server-projeto-korp ------------ 85.66s
+korp_stack : Subir a stack com docker compose -------------------------- 39.77s
+docker : Instalar Docker Engine e plugins ------------------------------ 30.32s
+docker : Instalar pre-requisitos do apt -------------------------------- 27.99s
+```
+
+Compilação e download reais, não cache: o build do Go levou 85 segundos e o
+compose outros 40 baixando as quatro imagens. As `changed=19` cobrem chave
+GPG, repositório, engine, `daemon.json`, árvore de diretórios, todos os
+arquivos de configuração, rede, imagem e containers.
+
+Comparação entre as três execuções:
+
+| Execução | `ok` | `changed` | Tempo | O que prova |
+|---|---|---|---|---|
+| Repetida, sem mudança | 49 | 0 | 33 s | idempotência |
+| Após parar um container | 49 | 1 | 48 s | convergência |
+| VM limpa, sem Docker | 52 | **19** | **3m38s** | **reprodutibilidade** |
+
+O `ok=52` maior que 49 vem dos handlers, que só executam quando há mudança
+real: `Reiniciar docker`, `Recarregar nginx` e `Recarregar prometheus`.
+
+### O endurecimento sobrevive ao provisionamento do zero
+
+```
+# docker port prometheus-projeto-korp
+9090/tcp -> 127.0.0.1:9090
+```
+
+Este é o resultado mais relevante da seção. O bind em loopback não é ajuste
+manual pendurado no host: está declarado no compose e é reproduzido a cada
+provisionamento.
+
+### Aceite pós-reconstrução
+
+```
+RESULTADO: 32 OK / 0 falhas
+```
+
+Três detalhes confirmam que a reconstrução foi mesmo do zero: `Docker version
+29.8.0` (versão instalada agora, diferente da anterior), `korp_http_requests_total
+= 35` (contador reiniciado — antes acumulava mais de 23 mil) e `0 restarts`
+em todos os quatro containers.
+
+O `verify.sh` corrigido durante o teste destrutivo também passou aqui,
+completando sua validação nos dois sentidos: falha com `health=down`, passa
+com `health=up`.
+
+### Dois defeitos latentes encontrados neste deploy
+
+Ambos foram registrados como limitações em vez de corrigidos, para não
+alterar o código depois de o conjunto de evidências estar completo.
+
+**Handlers do `korp_stack` executam depois da role `validate`.** No fim do
+log, `RUNNING HANDLER [korp_stack : Recarregar nginx]` aparece após
+`TASK [validate : Falhar o playbook se a validacao principal nao passou]`.
+Handlers são liberados no fim do *play*, não da role, e as três roles estão
+no mesmo play. Aqui não houve consequência, porque os containers foram
+criados já com a configuração montada. Mas num deploy que altere apenas o
+`nginx.conf`, a validação testaria o estado anterior ao reload. A correção é
+`meta: flush_handlers` ao fim das tasks da role — padrão que a role `docker`
+já aplica, e que se vê no mesmo log: `RUNNING HANDLER [docker : Reiniciar
+docker]` executa no meio da execução, não no fim.
+
+**Aviso de RAM vazio no `preflight.sh`.** Detalhado em
+`01-rastreabilidade-requisitos.md`, seção H.
 
 ---
 

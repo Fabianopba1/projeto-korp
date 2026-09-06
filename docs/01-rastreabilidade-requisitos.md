@@ -29,7 +29,7 @@ deixá-las escondidas no código.
 | 1.4 | Endpoint `GET /projeto-korp` | Registrado no roteador | ✅ |
 | 1.5 | Retorna JSON `{nome, horario}` | Struct serializada, campos exatos | ✅ |
 | 1.6 | `horario` em UTC, resolvido a cada requisição | `time.Now().UTC()` dentro do handler, não em variável de pacote | ➕ Coberto por teste unitário |
-| 1.7 | Dockerfile com build e execução | Multi-stage: `golang:1.22-alpine` → `distroless/static` | ➕ |
+| 1.7 | Dockerfile com build e execução | Multi-stage: `golang:1.22-alpine` → `distroless/static-debian12:nonroot` | ➕ |
 | 1.8 | Docker instalado e configurado em Linux | Role `docker`, repositório oficial, Debian 13 | 🔄 |
 | 1.9 | Rede Docker em modo bridge | `korp-net`, criada pela role e referenciada no compose | ✅ |
 | 1.10 | Compose com a app na rede, sem expor portas ao host | Serviço sem chave `ports:` | ✅ |
@@ -501,3 +501,6 @@ identificado.
 | A regra `SemTrafego` não dispara: o healthcheck em `/health` mantém a soma acima de zero (ver E.6) | Filtrar `path!="/health"` na expressão, ou excluir o healthcheck do middleware de métricas |
 | Painéis alimentados por métricas da aplicação exibem o último valor conhecido quando o serviço cai, em vez de "sem dados" (ver E.4.1) | `No value` explícito nos painéis, ou compor a expressão com `up` |
 | Erros gerados na borda (502 do NGINX) não aparecem em `korp_http_requests_total`, que é instrumentada dentro da aplicação | Expor métricas do próprio NGINX (`nginx-prometheus-exporter` ou `stub_status`) |
+| Handlers da role `korp_stack` são liberados no fim do play, depois da role `validate`: um deploy que altere apenas o `nginx.conf` faria a validação testar o estado anterior ao reload | `meta: flush_handlers` ao fim das tasks da role, padrão já aplicado na role `docker` |
+| `preflight.sh` faz parsing de `free -m` com o padrão `/^Mem:/`, que não casa em sistema com locale pt-BR (`Mem.:`): o valor de RAM sai vazio e cai no aviso | Prefixar o comando com `LC_ALL=C` para forçar a saída canônica |
+| A role instala `docker-ce` sem fixar versão: deploys em datas diferentes produzem versões diferentes do engine | Fixar a versão no `apt` e promovê-la conscientemente, trocando reprodutibilidade do processo por determinismo do artefato |

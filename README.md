@@ -185,7 +185,7 @@ o que veio na requisição. `/metrics` fica fora do middleware para o scrape
 não contar como tráfego.
 
 **Imagem.** Build multi-stage com `go vet` e `go test` dentro do build;
-runtime `distroless/static:nonroot`, 5,9 MB, sem shell. O healthcheck é um
+runtime `distroless/static-debian12:nonroot`, 5,9 MB, sem shell. O healthcheck é um
 segundo binário Go, já que não há curl nem wget na imagem.
 
 **Compose.** Rede `external`, criada pelo Ansible. `depends_on` com
