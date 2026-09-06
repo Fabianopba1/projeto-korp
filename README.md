@@ -131,10 +131,17 @@ mudando entre duas requisições). As checagens do Grafana são autenticadas de
 verdade, com a credencial lida do `.env` do host alvo — foi isso que expôs a
 divergência descrita em "Problemas encontrados".
 
-| Demonstração | Como | O que prova |
+| Demonstração | Como | Resultado observado |
 |---|---|---|
 | Idempotência | `make deploy` duas vezes | a segunda termina com `changed=0` |
-| Reprodutibilidade | snapshot limpo da VM + `make deploy` | reconstrói tudo do zero |
+| Convergência | parar um container e reimplantar | `changed=1`: só a task que subia a stack |
+| Reprodutibilidade | rollback do snapshot + `make deploy` | `changed=19` em 3m38s, a partir de VM sem Docker |
+
+Os números da coluna à direita são os das execuções registradas em
+`docs/02-registro-de-execucao.md`, com os logs em `docs/logs/`. Servem como
+evidência do que foi observado neste ambiente, não como garantia para
+qualquer execução: o tempo depende de rede e hardware, e a contagem de
+`changed` depende do desvio que o playbook precisa corrigir.
 
 ## Dashboard
 
@@ -182,7 +189,10 @@ explícitos no servidor.
 **Cardinalidade.** Os labels `path` e `method` recebem valores de listas
 fechadas (o padrão da rota registrada, e um conjunto fixo de métodos), nunca
 o que veio na requisição. `/metrics` fica fora do middleware para o scrape
-não contar como tráfego.
+não contar como tráfego. O `/health` continua instrumentado, e o healthcheck
+do Docker o consulta a cada 10 s — o que mantém a soma de requisições sempre
+acima de zero e torna o alerta `SemTrafego` incapaz de disparar. A limitação
+está detalhada na seção E.6 de `docs/01-rastreabilidade-requisitos.md`.
 
 **Imagem.** Build multi-stage com `go vet` e `go test` dentro do build;
 runtime `distroless/static-debian12:nonroot`, 5,9 MB, sem shell. O healthcheck é um
@@ -260,6 +270,19 @@ arquivo, voltaram idênticos a cada deploy; a senha, que vive só no volume,
 divergiu em silêncio. Corrigido recriando o volume. Só apareceu porque o
 `verify.sh` autentica de verdade — uma checagem que apenas perguntasse "o
 Grafana responde?" teria dado verde o tempo todo.
+
+**Dois defeitos no `verify.sh` encontrados durante um teste de
+indisponibilidade.** Derrubar o container da aplicação e conferir se as 32
+checagens acusam a falha revelou dois problemas no próprio script de aceite.
+O check de coleta procurava `"health":"up"` na resposta inteira da API de
+targets do Prometheus; como o Prometheus faz scrape de si mesmo, o target dele
+satisfazia o padrão e o check ficava verde com a aplicação parada. Passou a
+filtrar pelo job `http-server-projeto-korp` e a reportar o estado real. O
+segundo: sem resposta da aplicação, a variável de horário ficava vazia e
+`date -u -d ""` devolve a meia-noite do dia corrente, fazendo o script acusar
+divergência de relógio quando o problema era outro. Ganhou uma guarda
+explícita para o caso vazio. Os dois estão descritos em detalhe, com os
+placares de cada rodada, em `docs/02-registro-de-execucao.md`.
 
 ## Limitações
 
